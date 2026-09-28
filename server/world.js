@@ -88,6 +88,7 @@ export class Room {
 
   toLobby(reason) {
     this.phase = 'lobby';
+    console.log(`[toLobby] room=${this.code}${reason ? ` (${reason})` : ''}`);
     this.puzzle = freshPuzzle();
     this._btnHold = [0, 0, 0];
     for (const p of this.players) {
@@ -747,6 +748,7 @@ export class Room {
   win(p) {
     this.phase = 'done';
     this._clearWorldTimers();
+    console.log(`[roundEnd] room=${this.code} by=${p.name} (${Math.round((now() - this.startedAt) / 1000)}s)`);
     const timeMs = now() - this.startedAt;
     const mm = String(Math.floor(timeMs / 60000)).padStart(2, '0');
     const ss = String(Math.floor((timeMs % 60000) / 1000)).padStart(2, '0');

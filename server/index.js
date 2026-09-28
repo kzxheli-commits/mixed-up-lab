@@ -30,6 +30,21 @@ const MIME = {
 
 const server = http.createServer((req, res) => {
   const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+
+  // 调试状态端点：随时查看服务器上的房间、玩家与连接数
+  if (urlPath === '/debug') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      build: SERVER_BUILD,
+      connections: conns.size,
+      rooms: [...rooms.values()].map((r) => ({
+        code: r.code, phase: r.phase,
+        players: r.players.map((p) => ({ name: p.name, dc: p.dc })),
+      })),
+    }, null, 2));
+    return;
+  }
+
   const rel = urlPath === '/' ? '/index.html' : urlPath;
   const filePath = path.join(CLIENT_DIR, rel);
   if (!filePath.startsWith(CLIENT_DIR)) {
@@ -100,6 +115,7 @@ function handle(ws, raw) {
     }
     conn.code = room.code;
     conn.name = res.player.name;
+    console.log(`[${t}] ${res.player.name} -> ${room.code} (${room.players.length}人)`);
     ws.send(JSON.stringify({
       t: 'joined', id: conn.id, code: room.code, name: res.player.name,
       isHost: conn.id === room.hostId,
@@ -113,7 +129,10 @@ function handle(ws, raw) {
 
   let error = null;
   switch (t) {
-    case 'start': error = room.startMatch(conn.id); break;
+    case 'start':
+      error = room.startMatch(conn.id);
+      if (!error) console.log(`[start] room=${room.code} (${room.players.length}人)`);
+      break;
     case 'pose': room.handlePose(conn.id, msg); break;
     case 'objpose': room.handleObjPose(conn.id, msg.items); break;
     case 'grab': error = room.handleGrab(conn.id, msg.id); break;
