@@ -1,0 +1,15 @@
+{
+  "name": "mixed-up-lab",
+  "version": "0.1.0",
+  "description": "乱序实验室 Mixed Up Lab — 3D 多人欢乐规则解谜游戏",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node scripts/test-all.mjs"
+  },
+  "dependencies": {
+    "cannon-es": "^0.20.0",
+    "three": "^0.170.0",
+    "ws": "^8.18.0"
+  }
+}

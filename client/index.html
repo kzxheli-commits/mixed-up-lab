@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>乱序实验室 · Mixed Up Lab</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <!-- 大厅 -->
+  <div id="lobby" class="overlay">
+    <div class="lobby-card">
+      <h1>乱序实验室</h1>
+      <p class="sub">MIXED UP LAB · 3D 多人欢乐规则解谜</p>
+      <div id="join-form">
+        <input id="nick" maxlength="16" placeholder="你的昵称" autocomplete="off">
+        <div class="row">
+          <button id="btn-create" class="primary">创建房间</button>
+        </div>
+        <div class="row">
+          <input id="code" maxlength="4" placeholder="房间码" autocomplete="off">
+          <button id="btn-join">加入</button>
+        </div>
+      </div>
+      <div id="room-box" hidden>
+        <div class="code-line">房间码 <b id="room-code">----</b></div>
+        <ul id="player-list"></ul>
+        <button id="btn-start" class="primary" hidden>开始实验</button>
+        <div id="lobby-hint">等待房主开始…（至少 2 人）</div>
+      </div>
+      <div id="lobby-error"></div>
+      <div class="help">
+        WASD 移动 · 空格跳 · 鼠标视角 · E 交互/抓取 · 左键投掷<br>
+        数字键 1-4 改标签 · R 翻转轻重 · T 翻转动静 · F 物化 · Enter 聊天
+      </div>
+    </div>
+  </div>
+
+  <!-- 游戏 HUD -->
+  <div id="hud" hidden>
+    <div id="crosshair">·</div>
+    <div id="topbar">
+      <div id="quests-box">
+        <div class="qtitle">目标：启动实验室出口</div>
+        <ul id="quests"></ul>
+      </div>
+      <div id="chaos-box">
+        <span class="label">混乱度</span>
+        <div class="bar"><div id="chaos-bar"></div></div>
+        <span id="chaos-num">0%</span>
+      </div>
+    </div>
+    <div id="roominfo"></div>
+    <div id="abilities"></div>
+    <div id="prompt"></div>
+    <div id="tagpanel" hidden></div>
+    <div id="feed"></div>
+    <div id="toast"></div>
+    <div id="chat">
+      <div id="chat-log"></div>
+      <input id="chat-input" placeholder="按 Enter 聊天…" hidden maxlength="200" autocomplete="off">
+    </div>
+  </div>
+
+  <!-- 结算：本局实验报告 -->
+  <div id="report" class="overlay" hidden>
+    <div class="report-card">
+      <h2>实验完成！</h2>
+      <div id="report-body"></div>
+      <button id="btn-report-back" class="primary">返回大厅</button>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
