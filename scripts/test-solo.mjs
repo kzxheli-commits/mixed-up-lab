@@ -35,7 +35,14 @@ ws.on('open', async () => {
     check(state.players.length === 1, '快照只有 1 名玩家');
 
     check(msgs.every((m) => !(m.t === 'error' && /至少需要/.test(m.msg || ''))), '无"至少需要 2 人"拒绝');
+
+    // 断开后房间应被回收（防止僵尸房泄漏）
     ws.close();
+    await new Promise((r) => setTimeout(r, 700));
+    const portNum = new URL(BASE).port || '3000';
+    const dbg = await fetch(`http://127.0.0.1:${portNum}/debug`).then((r) => r.json());
+    check(!dbg.rooms.some((r) => r.code === j.code), '断线后房间被回收（无僵尸房）');
+
     console.log(failures === 0 ? '\nSOLO TESTS PASSED' : `\n${failures} SOLO TEST(S) FAILED`);
     process.exit(failures === 0 ? 0 : 1);
   } catch (e) {

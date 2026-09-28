@@ -105,6 +105,11 @@ export class Room {
     if (this.lowGrav) { this.lowGrav = null; }
   }
 
+  // 房间回收：清掉全部定时器，防止残留回调作用于已删除房间
+  destroy() {
+    this._clearWorldTimers();
+  }
+
   /* ---------------- 消息 ---------------- */
 
   sendTo(id, type, data) { this.send(id, { t: type, ...data }); }

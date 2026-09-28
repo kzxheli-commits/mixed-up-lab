@@ -183,8 +183,12 @@ function disconnect(ws) {
   const room = conn.code ? rooms.get(conn.code) : null;
   if (room) {
     room.markDisconnected(conn.id);
-    if (room.players.length === 0) {
+    // 房间内已无任何存活玩家：回收（任何阶段都适用，防止僵尸房泄漏）
+    const alive = room.players.filter((p) => !p.dc);
+    if (alive.length === 0) {
+      room.destroy();
       rooms.delete(room.code);
+      console.log(`[gc] room ${room.code} removed`);
     }
   }
 }
@@ -201,8 +205,14 @@ wss.on('connection', (ws) => {
   ws.on('message', (raw) => {
     try { handle(ws, raw.toString()); } catch (e) { console.error('handle error', e); }
   });
-  ws.on('close', () => disconnect(ws));
-  ws.on('error', () => disconnect(ws));
+  ws.on('close', () => {
+    // 关闭回调里的任何异常都不能杀死进程
+    try { disconnect(ws); } catch (e) { console.error('[dc-err]', e); }
+  });
+  ws.on('error', (e) => {
+    console.error('[ws-err]', e.message);
+    try { disconnect(ws); } catch (e2) { console.error('[dc-err]', e2); }
+  });
 });
 
 // 10Hz：规则检查（物化到期/压力板/模拟权）+ 状态快照
