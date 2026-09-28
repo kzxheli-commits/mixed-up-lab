@@ -121,7 +121,17 @@ async function main() {
   // giant / lowGravity 应有结束广播字段（end 由 tick 到期触发，此处只验证 event 已带类型）
   check(['chicken', 'giant', 'lowGravity', 'banana', 'rampage'].includes(ev.type), '事件类型在设计书事件表内');
 
-  A.ws.close(); B.ws.close();
+  console.log('== 全员断线压力（曾导致进程崩溃） ==');
+  A.ws.close();
+  B.ws.close();
+  // 事件服务器 EVENT_MS=700：断线后事件仍会触发，必须被防护拦下而不是崩进程
+  await sleep(1800);
+  const C = new Client('C');
+  await C.ready;
+  C.send({ t: 'create', name: 'AfterChaos' });
+  const alive = await C.wait((m) => m.t === 'joined', 4000, 'server alive');
+  check(/^[A-Z2-9]{4}$/.test(alive.code), `全员断线+事件触发后服务器仍存活（新房 ${alive.code}）`);
+  C.ws.close();
   console.log(failures === 0 ? '\nEVENT TESTS PASSED' : `\n${failures} EVENT TEST(S) FAILED`);
   process.exit(failures === 0 ? 0 : 1);
 }

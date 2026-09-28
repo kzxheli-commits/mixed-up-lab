@@ -390,12 +390,15 @@ export class Room {
     this.eventTimer = setTimeout(() => {
       this.eventTimer = null;
       if (this.phase !== 'playing') return;
-      this._fireEvent();
+      // 事件调度绝不能把进程打崩
+      try { this._fireEvent(); } catch (e) { console.error('[event]', this.code, e); }
       this._scheduleEvent();
     }, delay);
   }
 
   _fireEvent() {
+    const alive = this.players.filter((p) => !p.dc);
+    if (!alive.length) return; // 全员断线：跳过本轮事件
     if (!this.eventQueue.length) this.eventQueue = shuffle(Object.keys(RANDOM_EVENTS));
     const type = this.eventQueue.pop();
     const cfg = RANDOM_EVENTS[type];
@@ -428,15 +431,14 @@ export class Room {
         this.ev('spawn', { obj });
       }
     } else if (type === 'giant') {
-      const targets = this.players.filter((p) => !p.dc);
-      const target = pick(targets);
+      const target = pick(alive);
       this.giant = { id: target.id, until: now() + cfg.durationMs };
       this.ev('eventEnd', { type: 'giant', target: target.id, until: this.giant.until });
     } else if (type === 'lowGravity') {
       this.lowGrav = { until: now() + cfg.durationMs };
       this.ev('eventEnd', { type: 'lowGravity', until: this.lowGrav.until });
     } else if (type === 'banana') {
-      const p0 = pick(this.players.filter((p) => !p.dc));
+      const p0 = pick(alive);
       for (let i = 0; i < cfg.count; i++) {
         const ang = Math.random() * Math.PI * 2;
         const r = 3 + Math.random() * 4;
@@ -576,6 +578,12 @@ export class Room {
   tick() {
     if (this.phase !== 'playing') return;
     const t = now();
+
+    // 全员断线：立即收局回大厅，防止僵尸对局空转（事件/计时器会一直跑）
+    if (!this.players.some((p) => !p.dc)) {
+      this.toLobby('全员断线');
+      return;
+    }
 
     // 物化到期
     for (const p of this.players) {
