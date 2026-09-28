@@ -18,7 +18,16 @@ const ui = new UI({
   onStart: () => { sfx.unlock(); sfx.play('ui'); net.send({ t: 'start' }); },
   onChat: (text) => net.send({ t: 'chat', text }),
   onChatClosed: () => document.getElementById('c').requestPointerLock?.(),
-  onBack: () => { sfx.play('ui'); net.send({ t: 'backLobby' }); },
+  onBack: () => {
+    sfx.play('ui');
+    net.send({ t: 'backLobby' });
+    // 本地立即回大厅：断线/服务器无响应时按钮也必须有效
+    if (state === 'done') {
+      state = 'room';
+      player.enabled = false;
+      ui.showRoom(roomCode, roomPlayers, roomHostId, net.myId);
+    }
+  },
 });
 
 // 运行时错误直接显示在大厅，避免静默失败
@@ -32,6 +41,7 @@ const interact = new Interact(game, player, ui, net);
 
 let state = 'menu';        // menu | room | playing | done
 let roomCode = '';
+let roomHostId = '';
 let roomPlayers = [];
 let puzzle = { chairGiven: false, corePowered: false, exitOpen: false, sideDoorOpen: false };
 let orbTaken = false;
@@ -75,6 +85,7 @@ net.on('joined', (m) => {
 
 net.on('lobby', (m) => {
   roomPlayers = m.players;
+  roomHostId = m.hostId || roomHostId;
   if (state === 'menu') return;
   if (m.phase === 'lobby') {
     state = 'room';
@@ -249,6 +260,17 @@ net.on('close', () => {
   if (state === 'playing' || state === 'done') {
     ui.feed('⚠ 与服务器断开连接');
     ui.toast('连接断开，刷新页面重连');
+    // 结算页断线：在卡片内直接给出红字说明与出路（此前提示进 feed 被遮住，玩家看不到）
+    if (state === 'done') {
+      const body = document.getElementById('report-body');
+      if (body && !body.querySelector('.dc-note')) {
+        const note = document.createElement('div');
+        note.className = 'dc-note';
+        note.style.color = '#ff6b6b';
+        note.textContent = '⚠ 与服务器断开连接，本局不再自动返回 — 点下方按钮回大厅';
+        body.prepend(note);
+      }
+    }
   }
   player.enabled = false;
 });

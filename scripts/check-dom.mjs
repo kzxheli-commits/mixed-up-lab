@@ -17,7 +17,7 @@ check(htmlIds.size > 0, `HTML 声明 ${htmlIds.size} 个 id`);
 
 // HTML 引用的本地资源
 const refs = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1])
-  .filter((u) => !u.startsWith('http') && !u.startsWith('#'));
+  .filter((u) => !u.startsWith('http') && !u.startsWith('#') && !u.startsWith('data:'));
 for (const r of refs) {
   check(fs.existsSync(path.join(root, 'client', r)), `资源存在 ${r}`);
 }
