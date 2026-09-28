@@ -203,6 +203,11 @@ async function main() {
         check(document.getElementById('feed').children.length > 0, '事件 feed 有内容');
         check(document.getElementById('chat-log').children.length >= 0, '聊天区就绪');
 
+        // 13. 结算不卡死：点「返回大厅」应立刻回大厅（修复前是空函数 → 卡在报告页）
+        document.getElementById('btn-report-back').click();
+        check(await wait(() => document.getElementById('report').hidden
+          && !document.getElementById('lobby').hidden, 6000, 'back lobby'), '点返回大厅立即回到大厅界面');
+
         bob.close();
         return { log, failures };
       })().catch((e) => { log.push('  FAIL  异常: ' + e.message); return { log, failures: failures + 1 }; });

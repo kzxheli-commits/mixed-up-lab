@@ -18,7 +18,7 @@ const ui = new UI({
   onStart: () => { sfx.unlock(); sfx.play('ui'); net.send({ t: 'start' }); },
   onChat: (text) => net.send({ t: 'chat', text }),
   onChatClosed: () => document.getElementById('c').requestPointerLock?.(),
-  onBack: () => { /* 大厅由服务器 lobby 消息驱动 */ },
+  onBack: () => { sfx.play('ui'); net.send({ t: 'backLobby' }); },
 });
 
 // 运行时错误直接显示在大厅，避免静默失败

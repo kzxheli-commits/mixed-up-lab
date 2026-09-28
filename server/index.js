@@ -120,6 +120,10 @@ function handle(ws, raw) {
     case 'unmorph': error = room.handleUnmorph(conn.id); break;
     case 'interact': error = room.handleInteract(conn.id, msg.target); break;
     case 'chat': error = room.chat(conn.id, msg.text); break;
+    case 'backLobby':
+      // 结算页「返回大厅」：立即结束展示回大厅（不等 12 秒）
+      if (room.phase === 'done') room.toLobby();
+      break;
     case 'leave':
       room.removePlayer(conn.id);
       conn.code = null;
