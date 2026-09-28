@@ -13,6 +13,14 @@ export const SPAWNS = [
 // 出口触发区（东墙门洞内侧）
 export const EXIT = { x0: 9.0, x1: 10.0, z0: -1.6, z1: 1.6 };
 
+// 三按钮协作谜题（设计书 §24 谜题3）：地面 / 墙面 / 高处，同时按住 1 秒直通出口
+export const BUTTONS = [
+  { id: 'ground', label: '地面按钮', p: [2.5, 0.1, 3.5] },
+  { id: 'wall', label: '墙面按钮', p: [-1.5, 1.4, -7.7] },
+  { id: 'high', label: '高处按钮', p: [5.5, 2.4, -7.55] },
+];
+export const BUTTON_HOLD_MS = 1000;
+
 // 中央压力板（踩住开启侧室门）
 export const PLATE1 = { id: 'plate1', x0: -0.9, x1: 0.9, z0: 5.1, z1: 6.9 };
 

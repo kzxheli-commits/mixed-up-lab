@@ -1,7 +1,7 @@
 // 交互系统：射线目标、抓取/投掷、标签枪、智能 E 键
 import * as THREE from '../vendor/three.module.min.js';
 import * as CANNON from '../vendor/cannon-es.js';
-import { NPC, CORE_POS, ABILITIES, TAG_RULES } from './level.js';
+import { NPC, CORE_POS, ABILITIES, TAG_RULES, BUTTONS } from './level.js';
 import { sfx } from './audio.js';
 
 const FORM_LABEL = { BOX: '箱子', CHAIR: '椅子', SPRING: '弹簧', LAMP: '灯', ORB: '能源球' };
@@ -86,6 +86,11 @@ export class Interact {
       prompt = `<b>E</b> 检查核心（缺少能源球）`;
     } else if (this._platePrompt()) {
       prompt = this._platePrompt();
+    }
+    if (!prompt) {
+      const nearBtn = BUTTONS.find((b) => Math.hypot(bp.x - b.p[0], bp.z - b.p[2]) < 1.3
+        && Math.abs((bp.y - p.footOffset + 0.9) - b.p[1]) < 1.5);
+      if (nearBtn) prompt = `🔴 <b>${nearBtn.label}</b>：站上去或放个物体，按住 1 秒（三个同时按下 = 暴力解锁出口）`;
     }
     this.ui.prompt(prompt);
 

@@ -2,7 +2,7 @@
 // 客户端只上报意图与模拟结果，规则判定全部在此完成。
 import {
   ROOM, SPAWNS, EXIT, PLATE1, OBJECTS, TAG_RULES, ABILITIES, CHAOS_EVENTS,
-  RANDOM_EVENTS, SCALE_LEVELS, NPC, NPC_HOME, NPC_LINES,
+  RANDOM_EVENTS, SCALE_LEVELS, NPC, NPC_HOME, NPC_LINES, BUTTONS, BUTTON_HOLD_MS,
 } from '../client/js/level.js';
 
 const now = () => Date.now();
@@ -27,7 +27,8 @@ export class Room {
     this.hostId = null;
     this.phase = 'lobby';
     this.objects = [];
-    this.puzzle = { chairGiven: false, corePowered: false, exitOpen: false, sideDoorOpen: false };
+    this.puzzle = freshPuzzle();
+    this._btnHold = [0, 0, 0];
     this.chaos = 0;
     this.chaosMode = false;
     this.stats = null;
@@ -87,7 +88,8 @@ export class Room {
 
   toLobby(reason) {
     this.phase = 'lobby';
-    this.puzzle = { chairGiven: false, corePowered: false, exitOpen: false, sideDoorOpen: false };
+    this.puzzle = freshPuzzle();
+    this._btnHold = [0, 0, 0];
     for (const p of this.players) {
       p.form = 'human'; p.hold = null; p.tagCd = 0; p.scaleCd = 0; p.copyCd = 0; p.morphCd = 0;
     }
@@ -133,7 +135,8 @@ export class Room {
     this.objects = clone(OBJECTS).map((o) => ({
       ...o, scale: 1, p: [...o.p], q: [0, 0, 0, 1], by: null,
     }));
-    this.puzzle = { chairGiven: false, corePowered: false, exitOpen: false, sideDoorOpen: false };
+    this.puzzle = freshPuzzle();
+    this._btnHold = [0, 0, 0];
     this.chaos = 0;
     this.chaosMode = false;
     this.startedAt = now();
@@ -533,10 +536,12 @@ export class Room {
   }
 
   _checkExitOpen() {
-    const open = this.puzzle.chairGiven && this.puzzle.corePowered;
+    const open = (this.puzzle.chairGiven && this.puzzle.corePowered) || this.puzzle.buttonOpen;
     if (open && !this.puzzle.exitOpen) {
       this.puzzle.exitOpen = true;
-      this.feed('出口已开启！逃出去！');
+      this.feed(this.puzzle.buttonOpen && !(this.puzzle.chairGiven && this.puzzle.corePowered)
+        ? '💥 三按钮全按下！暴力解锁出口！'
+        : '出口已开启！逃出去！');
     }
     this.ev('puzzle', { puzzle: clone(this.puzzle) });
   }
@@ -612,6 +617,31 @@ export class Room {
     // 压力板：有玩家（含物化形态）站在板上 → 侧室门开
     const held = this.players.some((p) => !p.dc
       && p.x > PLATE1.x0 && p.x < PLATE1.x1 && p.z > PLATE1.z0 && p.z < PLATE1.z1 && p.y < 1.2);
+
+    // 三按钮谜题（设计书 §24）：玩家或物体占用 ≥1 秒算按下，三个同时按住 → 暴力直通
+    const btnStates = BUTTONS.map((btn, i) => {
+      const occupied =
+        this.players.some((p) => !p.dc
+          && Math.hypot(p.x - btn.p[0], p.z - btn.p[2]) < 0.85
+          && Math.abs((p.y + 0.9) - btn.p[1]) < 1.15)
+        || this.objects.some((o) => !o.removed && o.kind !== 'banana'
+          && Math.hypot(o.p[0] - btn.p[0], o.p[2] - btn.p[2]) < 0.95
+          && Math.abs(o.p[1] - btn.p[1]) < 1.0);
+      if (!occupied) this._btnHold[i] = 0;
+      else if (!this._btnHold[i]) this._btnHold[i] = t;
+      return !!this._btnHold[i] && t - this._btnHold[i] >= BUTTON_HOLD_MS;
+    });
+    const btnChanged = btnStates.some((s, i) => s !== this.puzzle.buttons[i]);
+    if (btnChanged) this.puzzle.buttons = btnStates;
+    const allPressed = btnStates.every(Boolean);
+    if (allPressed && !this.puzzle.buttonOpen) {
+      this.puzzle.buttonOpen = true;
+      this.stats.solves += 1;
+      this._checkExitOpen();
+      return; // _checkExitOpen 已广播 puzzle
+    }
+    if (btnChanged) this.ev('puzzle', { puzzle: clone(this.puzzle) });
+
     if (held !== this.puzzle.sideDoorOpen) {
       this.puzzle.sideDoorOpen = held;
       this.ev('puzzle', { puzzle: clone(this.puzzle) });
@@ -756,6 +786,10 @@ export class Room {
 
 const CORE_X = -6.5;
 const CORE_Z = -5.5;
+const freshPuzzle = () => ({
+  chairGiven: false, corePowered: false, exitOpen: false, sideDoorOpen: false,
+  buttonOpen: false, buttons: [false, false, false],
+});
 
 export function createRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

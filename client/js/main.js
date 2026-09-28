@@ -114,6 +114,7 @@ net.on('snap', (m) => {
   for (const it of m.objs) game.setSim(it.id, it.sim);
   game.setNpc(m.npc);
   chaos = m.chaos ?? chaos;
+  game.chaosValue = Math.round(chaos); // 控制台屏幕显示
   ui.setChaos(chaos, chaosMode);
 
   // 低重力事件：以服务器快照为准

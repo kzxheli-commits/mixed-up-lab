@@ -1,7 +1,7 @@
 // Three.js 场景 + cannon-es 物理世界 + 关卡几何 + 动态物体 + 远端玩家
 import * as THREE from '../vendor/three.module.min.js';
 import * as CANNON from '../vendor/cannon-es.js';
-import { ROOM, SIDE_ROOM, PLATFORM, NPC, CORE_POS, EXIT, ORB_HOME } from './level.js';
+import { ROOM, SIDE_ROOM, PLATFORM, NPC, CORE_POS, EXIT, ORB_HOME, BUTTONS } from './level.js';
 
 const FORM_MASS = (tags) => (tags.includes('LIGHT') ? 3 : tags.includes('HEAVY') ? 12 : 6);
 
@@ -273,6 +273,7 @@ export class Game {
     this._buildRoom();
     this._buildFurniture();
     this._buildPuzzleProps();
+    this._buildProps();
     this.resize();
     addEventListener('resize', () => this.resize());
   }
@@ -592,12 +593,298 @@ export class Game {
     this.scene.add(cg);
     this.coreGroup = { group: cg, orb, ring };
 
+    // 三按钮（设计书 §24：地面 / 墙面 / 高处）
+    this.buttonMeshes = BUTTONS.map((b, idx) => {
+      const g = new THREE.Group();
+      const metal = new THREE.MeshStandardMaterial({ color: '#55677d', roughness: 0.45, metalness: 0.55 });
+      const lampMat = new THREE.MeshStandardMaterial({
+        color: '#e85d75', emissive: '#e85d75', emissiveIntensity: 0.8, roughness: 0.35,
+      });
+      let lamp;
+      if (b.id === 'ground') {
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.56, 0.14, 22), metal);
+        base.position.y = 0.07;
+        lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.1, 22), lampMat);
+        lamp.position.y = 0.17;
+        g.add(base, lamp);
+      } else if (b.id === 'wall') {
+        const plate = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.12), metal);
+        lamp = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12), lampMat);
+        lamp.position.z = 0.16;
+        g.add(plate, lamp);
+      } else {
+        // 高处按钮：墙上托架 + 悬空圆盘（需叠箱/弹簧/缩放才能按到）
+        const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.5), metal);
+        bracket.rotation.x = -0.5;
+        bracket.position.y = -0.3;
+        const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.44, 0.12, 22), metal);
+        lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.1, 22), lampMat);
+        lamp.position.y = 0.1;
+        g.add(bracket, plate, lamp);
+      }
+      g.position.set(...b.p);
+      if (b.id === 'wall') g.rotation.y = Math.PI; // 面向场内（北墙）
+      g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      this.scene.add(g);
+      return { group: g, lamp, idx, pressed: false };
+    });
+
     // 核心可站立基座
     this.world.addBody(new CANNON.Body({
       mass: 0,
       shape: new CANNON.Cylinder(0.9, 1.1, 1.1, 14),
       position: new CANNON.Vec3(CORE_POS[0], 0.55, CORE_POS[2]),
     }));
+  }
+
+  /* ---------------- 三级装饰：小物件 / 动画道具 / 巡逻机器人（§45 §54） ---------------- */
+
+  _buildProps() {
+    const add = (mesh, x, y, z, ry = 0) => {
+      mesh.position.set(x, y, z);
+      mesh.rotation.y = ry;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+      return mesh;
+    };
+    const plastic = (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.55 });
+    const glassMat = () => new THREE.MeshStandardMaterial({
+      color: '#bde0fe', roughness: 0.1, transparent: true, opacity: 0.45,
+    });
+
+    /* --- 控制台组（带发光屏幕，程序绘制） --- */
+    const consoleBody = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.95, 1.0), plastic('#4d7cfe'));
+    consoleBody.material.color.set('#3d6ae0');
+    add(consoleBody, 0, 0.48, -7.0);
+    add(new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.06, 1.06), plastic('#8fa3b8')), 0, 0.98, -7.0);
+    this.screens = [];
+    for (const sx of [-1.0, 0, 1.0]) {
+      const cv = document.createElement('canvas');
+      cv.width = 128; cv.height = 72;
+      const tex = new THREE.CanvasTexture(cv);
+      const screen = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.86, 0.5),
+        new THREE.MeshBasicMaterial({ map: tex })
+      );
+      screen.position.set(sx, 1.45, -6.75);
+      screen.rotation.x = -0.42;
+      this.scene.add(screen);
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.6, 0.06), plastic('#22303f'));
+      frame.position.set(sx, 1.45, -6.79);
+      frame.rotation.x = -0.42;
+      this.scene.add(frame);
+      this.screens.push({ cv, tex });
+    }
+    // 控制台 LED 阵列
+    this.leds = [];
+    const ledColors = ['#51cf66', '#ffd43b', '#ff6b6b', '#4dabf7'];
+    for (let i = 0; i < 10; i++) {
+      const led = new THREE.Mesh(
+        new THREE.SphereGeometry(0.035, 8, 6),
+        new THREE.MeshBasicMaterial({ color: ledColors[i % ledColors.length] })
+      );
+      led.position.set(-1.55 + i * 0.34, 1.06, -6.6);
+      this.scene.add(led);
+      this.leds.push({ mesh: led, phase: Math.random() * 6.28 });
+    }
+
+    /* --- 储物柜排（南墙，侧室旁） --- */
+    const lockerMat = plastic('#7b8ba1');
+    for (let i = 0; i < 4; i++) {
+      const locker = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 2.0, 0.5), lockerMat);
+      body.position.y = 1.0;
+      const seam = new THREE.Mesh(new THREE.BoxGeometry(0.04, 1.8, 0.02), plastic('#5b6b81'));
+      seam.position.set(0, 1.0, 0.26);
+      const handle = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.05, 0.04), plastic('#ffd43b'));
+      handle.position.set(0.18, 1.1, 0.27);
+      locker.add(body, seam, handle);
+      locker.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      add(locker, 7.0 + (i % 2) * 0.78, 0, 7.55 + Math.floor(i / 2) * 0.0);
+      locker.position.y = 0;
+    }
+
+    /* --- 推车 / 灭火器 / 垃圾桶 --- */
+    const cart = new THREE.Group();
+    const cartTop = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.07, 0.6), plastic('#ffb703'));
+    cartTop.position.y = 0.62;
+    cart.add(cartTop);
+    for (const [dx, dz] of [[-0.4, -0.22], [0.4, -0.22], [-0.4, 0.22], [0.4, 0.22]]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.55, 8), plastic('#8fa3b8'));
+      leg.position.set(dx, 0.3, dz);
+      cart.add(leg);
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.05, 10), plastic('#22303f'));
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(dx, 0.07, dz);
+      cart.add(wheel);
+    }
+    cart.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    add(cart, -5.5, 0, 2.5, 0.6);
+
+    const extinguisher = new THREE.Group();
+    const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.55, 12), plastic('#e03131'));
+    tank.position.y = 0.4;
+    const nozzle = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.06, 0.06), plastic('#22303f'));
+    nozzle.position.y = 0.72;
+    extinguisher.add(tank, nozzle);
+    extinguisher.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    add(extinguisher, 8.9, 0, -6.8);
+
+    const bin = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.25, 0.6, 14), plastic('#5c7a8c'));
+    add(bin, -9.0, 0.3, 6.8);
+
+    /* --- 工作台小件（§45 密度） --- */
+    const paper = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.015, 0.32), plastic('#f8f9fa'));
+    add(paper, 2.9, 1.02, -6.9, 0.5);
+    const paper2 = paper.clone();
+    add(paper2, 3.2, 1.04, -6.7, -0.3);
+    const mug = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.12, 12), plastic('#ff6b6b'));
+    add(mug, 1.9, 1.07, -6.6);
+    const hammerHead = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.08), plastic('#8fa3b8'));
+    const hammerHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 8), plastic('#c98d4b'));
+    hammerHandle.rotation.z = Math.PI / 2;
+    const hammer = new THREE.Group();
+    hammerHead.position.x = 0.14;
+    hammer.add(hammerHead, hammerHandle);
+    hammer.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    add(hammer, -3.2, 1.0, -6.2, 0.9);
+    for (let i = 0; i < 3; i++) {
+      const battery = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.1, 8), plastic(i === 1 ? '#ffd43b' : '#51cf66'));
+      battery.rotation.x = Math.PI / 2;
+      add(battery, 6.6 + i * 0.1, 0.05, 3.0 + (i % 2) * 0.12, i * 0.7);
+    }
+
+    /* --- 地面细节（§42）：压力板黑黄环、排水沟、电缆槽 --- */
+    const warn = new THREE.MeshStandardMaterial({ color: '#f59f00', roughness: 0.7 });
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, 0.18), i % 2 ? warn : plastic('#22303f'));
+      seg.position.set(Math.cos(a) * 1.3, 0.015, 6 + Math.sin(a) * 1.3);
+      seg.rotation.y = -a;
+      this.scene.add(seg);
+    }
+    // 排水沟（北墙沿线格栅）
+    const grate = plastic('#3d4a5c');
+    for (let i = 0; i < 26; i++) {
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.02, 0.07), grate);
+      bar.position.set(-8.5 + i * 0.68, 0.012, -7.55);
+      this.scene.add(bar);
+    }
+    // 电缆槽（控制台 → 核心）
+    const duct = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.05, 7.6), plastic('#2f3d52'));
+    duct.position.set(-3.4, 0.025, -4.4);
+    duct.rotation.y = -0.62;
+    this.scene.add(duct);
+
+    /* --- 墙面细节（§41）：腰线、检修板、窗框与远景 --- */
+    const belt = new THREE.MeshStandardMaterial({ color: '#ffd43b', roughness: 0.65 });
+    const beltN = new THREE.Mesh(new THREE.BoxGeometry(19.2, 0.16, 0.04), belt);
+    beltN.position.set(0, 1.15, -7.77);
+    this.scene.add(beltN);
+    const beltW = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 15.2), belt);
+    beltW.position.set(-9.77, 1.15, 0);
+    this.scene.add(beltW);
+    const panel = plastic('#b9c4d1');
+    for (const [px, pz, ry] of [[-5, -7.76, 0], [3.4, -7.76, 0], [-9.76, -3, Math.PI / 2]]) {
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 0.05), panel);
+      p.position.set(px, 2.2, pz);
+      p.rotation.y = ry;
+      this.scene.add(p);
+      for (const [ox, oy] of [[-0.38, 0.28], [0.38, 0.28], [-0.38, -0.28], [0.38, -0.28]]) {
+        const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 6), plastic('#5b6b81'));
+        bolt.position.set(px + (ry ? 0 : ox), 2.2 + oy, pz + (ry ? ox : 0));
+        this.scene.add(bolt);
+      }
+    }
+    // 窗框十字 + 窗外远景剪影（§57）
+    const frameMat = plastic('#22303f');
+    const winBarV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.6, 0.05), frameMat);
+    winBarV.position.set(0, 2.6, -7.74);
+    this.scene.add(winBarV);
+    const winBarH = new THREE.Mesh(new THREE.BoxGeometry(6, 0.06, 0.05), frameMat);
+    winBarH.position.set(0, 2.6, -7.74);
+    this.scene.add(winBarH);
+    const silh = new THREE.MeshBasicMaterial({ color: '#4a6a8f' });
+    for (const [sx, sw, sh] of [[-2.4, 1.4, 0.9], [-0.4, 2.0, 1.3], [1.8, 1.1, 0.7]]) {
+      const s = new THREE.Mesh(new THREE.PlaneGeometry(sw, sh), silh);
+      s.position.set(sx, 1.9 + sh / 2, -7.95);
+      this.scene.add(s);
+    }
+
+    /* --- 天花板（§43）：横梁 / 通风管 / 吊线 --- */
+    const beamMat = new THREE.MeshStandardMaterial({ color: '#3d4a5c', roughness: 0.5, metalness: 0.5 });
+    for (const bz of [-5, 0, 5]) {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(19.4, 0.24, 0.3), beamMat);
+      beam.position.set(0, 4.78, bz);
+      beam.castShadow = true;
+      this.scene.add(beam);
+    }
+    const ductMat = new THREE.MeshStandardMaterial({ color: '#8fa3b8', roughness: 0.4, metalness: 0.55 });
+    const ductMain = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 14, 14), ductMat);
+    ductMain.rotation.z = Math.PI / 2;
+    ductMain.position.set(-1, 4.45, -6.5);
+    this.scene.add(ductMain);
+    for (const dx of [-6, 4]) {
+      const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.12, 14), plastic('#5b6b81'));
+      collar.rotation.z = Math.PI / 2;
+      collar.position.set(dx, 4.45, -6.5);
+      this.scene.add(collar);
+    }
+    const drop = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.3, 0.5, 12), ductMat);
+    drop.position.set(7.6, 3.3, -7.2); // 蒸汽排气口
+    this.scene.add(drop);
+    // 吊灯垂线
+    for (const x of [-6, 0, 6]) {
+      const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.3, 6), plastic('#22303f'));
+      cord.position.set(x, 4.78, 0);
+      this.scene.add(cord);
+    }
+
+    /* --- 排气蒸汽（§55） --- */
+    this.steams = [];
+    const steamMat = () => new THREE.SpriteMaterial({
+      color: '#e9ecef', transparent: true, opacity: 0.4, depthWrite: false,
+    });
+    const steamCv = document.createElement('canvas');
+    steamCv.width = steamCv.height = 64;
+    const sg = steamCv.getContext('2d');
+    const grad = sg.createRadialGradient(32, 32, 4, 32, 32, 30);
+    grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    sg.fillStyle = grad;
+    sg.fillRect(0, 0, 64, 64);
+    const steamTex = new THREE.CanvasTexture(steamCv);
+    for (let i = 0; i < 3; i++) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: steamTex, transparent: true, opacity: 0.0, depthWrite: false,
+      }));
+      sp.scale.setScalar(0.5);
+      sp.userData = { base: [7.6, 3.2, -7.2], offset: i / 3 };
+      this.scene.add(sp);
+      this.steams.push(sp);
+    }
+
+    /* --- 巡逻小机器人（§54 环境动画） --- */
+    const robot = new THREE.Group();
+    const rBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.18, 6, 12), plastic('#8fa3b8'));
+    rBody.position.y = 0.34;
+    const rEye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8),
+      new THREE.MeshBasicMaterial({ color: '#4dabf7' }));
+    rEye.position.set(0, 0.46, 0.13);
+    const rAntenna = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 6), plastic('#ffd43b'));
+    rAntenna.position.y = 0.64;
+    const rBase = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.17, 0.1, 12), plastic('#22303f'));
+    rBase.position.y = 0.06;
+    robot.add(rBody, rEye, rAntenna, rBase);
+    robot.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    this.scene.add(robot);
+    this.robot = {
+      group: robot,
+      path: [[-3.5, -3.5], [3.5, -3.5], [3.5, 2.5], [-3.5, 2.5]],
+      seg: 0, t: 0, speed: 0.055,
+      eye: rEye,
+    };
   }
 
   /* ---------------- 动态物体 ---------------- */
@@ -765,6 +1052,14 @@ export class Game {
       this.plateMesh.material.color.set(puzzle.sideDoorOpen ? '#51cf66' : '#e85d75');
       this.plateMesh.material.emissive.set(puzzle.sideDoorOpen ? '#51cf66' : '#e85d75');
     }
+    if (this.buttonMeshes && puzzle.buttons) {
+      this.buttonMeshes.forEach((bm, i) => {
+        bm.pressed = !!puzzle.buttons[i];
+        const color = bm.pressed ? '#51cf66' : '#e85d75';
+        bm.lamp.material.color.set(color);
+        bm.lamp.material.emissive.set(color);
+      });
+    }
   }
 
   /* ---------------- 远端玩家 ---------------- */
@@ -889,6 +1184,77 @@ export class Game {
 
     // 风扇
     if (this.fan) this.fan.rotation.y += dt * 2.2;
+
+    // 三按钮指示灯：未按红灯脉动，按下绿灯常亮
+    if (this.buttonMeshes) {
+      const pulse = 0.7 + Math.sin(performance.now() / 380) * 0.35;
+      for (const bm of this.buttonMeshes) {
+        bm.lamp.material.emissiveIntensity = bm.pressed ? 1.8 : pulse;
+      }
+    }
+
+    /* ---- 环境动画（设计书 §54：让实验室看起来正在运行） ---- */
+    const nowMs = performance.now();
+
+    // 控制台屏幕：每 0.45s 重绘波形与字符
+    if (this.screens && nowMs - (this._screenT || 0) > 450) {
+      this._screenT = nowMs;
+      const chaosTxt = this.chaosValue ?? 0;
+      for (let si = 0; si < this.screens.length; si++) {
+        const s = this.screens[si];
+        const g = s.cv.getContext('2d');
+        g.fillStyle = '#06263f';
+        g.fillRect(0, 0, 128, 72);
+        g.strokeStyle = si === 1 ? '#51cf66' : '#4dabf7';
+        g.lineWidth = 2;
+        g.beginPath();
+        for (let x = 0; x <= 128; x += 4) {
+          const y = 40 + Math.sin((x + nowMs / 50 + si * 40) / 11) * (10 + Math.random() * 8);
+          if (x === 0) g.moveTo(x, y); else g.lineTo(x, y);
+        }
+        g.stroke();
+        g.font = '10px monospace';
+        g.fillStyle = '#51cf66';
+        g.fillText('MUL-OS v0.3', 5, 12);
+        g.fillStyle = '#ffd43b';
+        g.fillText(`CHAOS ${chaosTxt}%`, 5, 66);
+        s.tex.needsUpdate = true;
+      }
+    }
+
+    // LED 阵列：相位闪烁
+    if (this.leds) {
+      for (const l of this.leds) l.mesh.visible = Math.sin(nowMs / 260 + l.phase) > -0.3;
+    }
+
+    // 排气蒸汽：上升扩散循环
+    if (this.steams) {
+      for (const sp of this.steams) {
+        const u = ((nowMs / 4200) + sp.userData.offset) % 1;
+        const [bx, by, bz] = sp.userData.base;
+        sp.position.set(bx + Math.sin(u * 7) * 0.18, by + u * 1.6, bz);
+        sp.scale.setScalar(0.35 + u * 0.95);
+        sp.material.opacity = 0.4 * Math.sin(u * Math.PI);
+      }
+    }
+
+    // 巡逻小机器人：沿矩形路径走动 + 浮动 + 眼睛扫色
+    if (this.robot) {
+      const r = this.robot;
+      r.t += dt * 0.17;
+      while (r.t >= 1) { r.t -= 1; r.seg = (r.seg + 1) % r.path.length; }
+      const a = r.path[r.seg];
+      const b = r.path[(r.seg + 1) % r.path.length];
+      const rx = a[0] + (b[0] - a[0]) * r.t;
+      const rz = a[1] + (b[1] - a[1]) * r.t;
+      r.group.position.set(rx, Math.abs(Math.sin(nowMs / 170)) * 0.035, rz);
+      const targetYaw = Math.atan2(b[0] - a[0], b[1] - a[1]);
+      let rdy = targetYaw - r.group.rotation.y;
+      while (rdy > Math.PI) rdy -= Math.PI * 2;
+      while (rdy < -Math.PI) rdy += Math.PI * 2;
+      r.group.rotation.y += rdy * 0.12;
+      r.eye.material.color.setHSL((nowMs / 3000) % 1, 0.85, 0.62);
+    }
 
     // 动态物体：同步视觉；非模拟者做插值
     for (const d of this.dynamics.values()) {
