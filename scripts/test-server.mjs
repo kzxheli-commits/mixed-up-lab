@@ -104,6 +104,15 @@ async function main() {
   A.pos = [...rsA.you.spawn];
   B.pos = [...rsB.you.spawn];
 
+  console.log('== NPC 快照 ==');
+  const npcSnap = await A.wait((m) => m.t === 'snap' && m.npc && m.npc.line, 4000, 'npc line');
+  check(Number.isFinite(npcSnap.npc.x) && Number.isFinite(npcSnap.npc.yaw), `NPC 状态下发 (x=${npcSnap.npc.x})`);
+  check(npcSnap.npc.line.length > 0, `NPC 开局台词：「${npcSnap.npc.line}」`);
+  const npcSnap2 = await A.wait(
+    (m) => m.t === 'snap' && m.npc && m.npc.line === null, 6000, 'npc line expire'
+  );
+  check(npcSnap2.npc.line === null, '台词到期后气泡自动收起');
+
   console.log('== 标签枪 ==');
   // Alice 传送到 box2 旁改标签
   await A.moveTo(-2, 1, 3.4);
@@ -188,6 +197,9 @@ async function main() {
   const end = await A.wait((m) => m.t === 'roundEnd', 5000, 'roundEnd');
   check(end.by.name === 'Alice', `结算触发者 ${end.by.name}`);
   check(end.stats.tags >= 2 && end.stats.morphs >= 1, `统计记录 tags=${end.stats.tags} morphs=${end.stats.morphs}`);
+  check(typeof end.stats.copies === 'number' && typeof end.stats.scaled === 'number'
+    && typeof end.stats.slips === 'number' && typeof end.stats.blasts === 'number'
+    && typeof end.stats.events === 'number', '实验报告统计字段齐全（copies/scaled/slips/blasts/events）');
   check(typeof end.title === 'string' && end.title.length > 0, `称号：${end.title}`);
   check(/^\d\d:\d\d$/.test(end.time), `用时 ${end.time}`);
 

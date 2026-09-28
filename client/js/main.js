@@ -4,15 +4,18 @@ import { Game } from './game.js';
 import { Player } from './player.js';
 import { Interact } from './interact.js';
 import { UI } from './ui.js';
+import { sfx } from './audio.js';
 
 const net = new Net();
 const ui = new UI({
-  onCreate: (nick) => net.send({ t: 'create', name: nick || '玩家' }),
+  onCreate: (nick) => { sfx.unlock(); sfx.play('ui'); net.send({ t: 'create', name: nick || '玩家' }); },
   onJoin: (nick, code) => {
+    sfx.unlock();
     if (!code || code.length !== 4) { ui.lobbyError('请输入 4 位房间码'); return; }
+    sfx.play('ui');
     net.send({ t: 'join', name: nick || '玩家', code });
   },
-  onStart: () => net.send({ t: 'start' }),
+  onStart: () => { sfx.unlock(); sfx.play('ui'); net.send({ t: 'start' }); },
   onChat: (text) => net.send({ t: 'chat', text }),
   onChatClosed: () => document.getElementById('c').requestPointerLock?.(),
   onBack: () => { /* 大厅由服务器 lobby 消息驱动 */ },
@@ -53,13 +56,14 @@ player.onToggleMorph = () => {
   else net.send({ t: 'unmorph' });
 };
 
-game.onBlast = () => player.blast();
-game.onSpring = () => { /* 弹跳反馈由物理表现 */ };
+game.onBlast = () => { player.blast(); sfx.play('boom'); };
+game.onSpring = () => sfx.play('boing');
 player.onSlip = () => {
   net.send({ t: 'chaosEvent', type: 'banana' });
+  sfx.play('slip');
   ui.toast('滑——！');
 };
-player.onPeck = () => ui.toast('被鸡撞了！');
+player.onPeck = () => { sfx.play('peck'); ui.toast('被鸡撞了！'); };
 
 /* ---------------- 网络消息 ---------------- */
 
@@ -108,6 +112,7 @@ net.on('snap', (m) => {
   game.setRemotePlayers(m.players, net.myId);
   game.updateObjTargets(m.objs);
   for (const it of m.objs) game.setSim(it.id, it.sim);
+  game.setNpc(m.npc);
   chaos = m.chaos ?? chaos;
   ui.setChaos(chaos, chaosMode);
 
@@ -148,13 +153,18 @@ net.on('ev', (m) => {
     case 'consumed':
       if (interact.held === m.obj) interact.held = null;
       game.removeObject(m.obj);
+      sfx.play('door');
       ui.feed(`已交付：${m.obj === 'chair0' ? '椅子' : '能源球'}`);
       break;
     case 'scale':
       game.applyScale(m.obj, m.scale);
+      if (m.id !== net.myId) sfx.play('scale');
       break;
     case 'spawn':
       game.spawnObject(m.obj);
+      if (m.obj.kind === 'chicken') sfx.play('cluck');
+      else if (m.obj.kind === 'banana') sfx.play('ui');
+      else if (m.obj.from !== net.myId) sfx.play('copy');
       break;
     case 'despawn':
       if (interact.held === m.obj) interact.held = null;
@@ -164,6 +174,9 @@ net.on('ev', (m) => {
       if (m.type === 'rampage') {
         game.rampage();
         ui.feed('💥 物体暴走！（由最近的玩家物理模拟）');
+        sfx.play('boom');
+      } else if (m.type !== 'chicken') {
+        sfx.play('alarm');
       }
       break;
     case 'eventEnd':
@@ -172,6 +185,7 @@ net.on('ev', (m) => {
     case 'morph': {
       const me = m.id === net.myId;
       if (me) player.setForm(m.form, roomPlayers.find((p) => p.id === net.myId)?.color);
+      sfx.play(m.form === 'box' ? 'morph' : 'unmorph');
       if (m.form === 'box') ui.feed(`📦 ${nameOf(m.id)} 变成了箱子`);
       else if (m.form === 'human') ui.feed(`✨ ${nameOf(m.id)} 恢复了原样`);
       break;
@@ -180,11 +194,15 @@ net.on('ev', (m) => {
       if (m.obj === 'orb') orbTaken = true;
       interact.remoteHold(m.obj ? m.id : null, m.obj);
       break;
-    case 'puzzle':
+    case 'puzzle': {
+      const before = puzzle;
       puzzle = m.puzzle;
       game.setPuzzle(puzzle);
       ui.renderQuests(puzzle, orbTaken);
+      if (puzzle.exitOpen && !before.exitOpen) sfx.play('door');
+      else if (puzzle.sideDoorOpen !== before.sideDoorOpen) sfx.play('door');
       break;
+    }
     case 'chaos':
       chaos = m.chaos;
       ui.setChaos(chaos, chaosMode);
@@ -220,6 +238,7 @@ net.on('roundEnd', (m) => {
   player.enabled = false;
   interact.release();
   if (player.locked) document.exitPointerLock();
+  sfx.play('win');
   ui.showReport(m);
   ui.prompt(null);
   ui.tagPanel(null);

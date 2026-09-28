@@ -2,7 +2,7 @@
 // 客户端只上报意图与模拟结果，规则判定全部在此完成。
 import {
   ROOM, SPAWNS, EXIT, PLATE1, OBJECTS, TAG_RULES, ABILITIES, CHAOS_EVENTS,
-  RANDOM_EVENTS, SCALE_LEVELS,
+  RANDOM_EVENTS, SCALE_LEVELS, NPC, NPC_HOME, NPC_LINES,
 } from '../client/js/level.js';
 
 const now = () => Date.now();
@@ -41,6 +41,10 @@ export class Room {
     this.lowGrav = null;    // {until}
     this.copySeq = 0;
     this._lastSlip = 0;
+    this.npc = {
+      x: NPC_HOME.x, z: NPC_HOME.z, yaw: Math.PI / 2,
+      line: '我需要一把椅子！', lineUntil: 0, nextLineAt: 0, scared: false,
+    };
   }
 
   /* ---------------- 玩家管理 ---------------- */
@@ -133,7 +137,14 @@ export class Room {
     this.chaos = 0;
     this.chaosMode = false;
     this.startedAt = now();
-    this.stats = { tags: 0, morphs: 0, throws: 0, chaosPeak: 0, solves: 0, copies: 0, scaled: 0, events: 0 };
+    this.stats = { tags: 0, morphs: 0, throws: 0, chaosPeak: 0, solves: 0, copies: 0, scaled: 0, events: 0, slips: 0, blasts: 0 };
+
+    // NPC 重置：开局亮出第一句提示
+    this.npc = {
+      x: NPC_HOME.x, z: NPC_HOME.z, yaw: Math.PI / 2,
+      line: '我需要一把椅子！', lineUntil: now() + 5000,
+      nextLineAt: now() + 12_000, scared: false,
+    };
 
     this.players.forEach((p, i) => {
       const s = SPAWNS[i % SPAWNS.length];
@@ -309,7 +320,7 @@ export class Room {
     obj.scale = SCALE_LEVELS[next];
     p.scaleCd = now() + ABILITIES.scaleGun.cooldownMs;
     this.stats.scaled += 1;
-    this.ev('scale', { obj: obj.id, scale: obj.scale });
+    this.ev('scale', { id, obj: obj.id, scale: obj.scale });
     return null;
   }
 
@@ -341,6 +352,7 @@ export class Room {
       ],
       q: [0, 0, 0, 1],
       by: null,
+      from: id,
       life: now() + ABILITIES.copyGun.lifetimeMs, // 限时存在
     };
     this.objects.push(copy);
@@ -359,6 +371,7 @@ export class Room {
       const t = now();
       if (t - this._lastSlip < 1500) return null; // 全局限速防刷
       this._lastSlip = t;
+      this.stats.slips += 1;
       this.addChaos(CHAOS_EVENTS.bananaSlip, '有人踩了香蕉皮，滑飞了！');
     }
     return null;
@@ -386,6 +399,11 @@ export class Room {
     this.ev('event', { type });
     this.feed(cfg.text);
     if (cfg.chaos) this.addChaos(cfg.chaos, null);
+    if (type === 'chicken') {
+      // 实验员对鸡的定向反应（设计书 §26）
+      this.npc.line = '鸡又来了？！这不是实验步骤！';
+      this.npc.lineUntil = now() + 4000;
+    }
 
     if (type === 'chicken') {
       const spawn = pick(SPAWNS);
@@ -532,6 +550,7 @@ export class Room {
     if (feedText) this.feed(feedText);
     if (this.chaos >= 90 && !this.chaosMode) {
       this.chaosMode = true;
+      this.stats.blasts += 1;
       this.ev('chaosMode', { on: true });
       this.feed('CHAOS MODE！实验室失控了！');
       setTimeout(() => {
@@ -575,6 +594,8 @@ export class Room {
       this.lowGrav = null;
     }
 
+    this._npcTick(t);
+
     // 物理模拟权：被持有时归持有者，否则归最近的在线玩家（客户端只模拟 sim===自己的物体）
     for (const obj of this.objects) {
       if (obj.removed) continue;
@@ -598,6 +619,63 @@ export class Room {
     }
   }
 
+  /* ---------------- NPC AI（设计书 §26：看玩家、会躲、会说话） ---------------- */
+
+  _npcTick(t) {
+    const npc = this.npc;
+
+    // 最近的在线玩家（用于面向）
+    let near = null, nearD = 1e9;
+    for (const p of this.players) {
+      if (p.dc) continue;
+      const d = Math.hypot(p.x - npc.x, p.z - npc.z);
+      if (d < nearD) { nearD = d; near = p; }
+    }
+
+    // 躲鸡：1.8m 内的鸡会把实验员吓跑（坐下后不再移动）
+    let threat = null;
+    if (!this.puzzle.chairGiven) {
+      for (const o of this.objects) {
+        if (o.removed || o.kind !== 'chicken') continue;
+        const d = Math.hypot(o.p[0] - npc.x, o.p[2] - npc.z);
+        if (d < 1.8) { threat = o; break; }
+      }
+    }
+    if (threat) {
+      const dx = npc.x - threat.p[0];
+      const dz = npc.z - threat.p[2];
+      const len = Math.hypot(dx, dz) || 1;
+      npc.x = Math.max(4.0, Math.min(8.6, npc.x + (dx / len) * 0.3));
+      npc.z = Math.max(-6.0, Math.min(6.0, npc.z + (dz / len) * 0.3));
+      npc.scared = true;
+      if (t - (npc._scaredLineAt || 0) > 6000) {
+        npc._scaredLineAt = t;
+        npc.line = '鸡又来了？！离我远点！';
+        npc.lineUntil = t + 3000;
+      }
+    } else {
+      npc.scared = false;
+    }
+
+    // 面向：躲鸡时面向逃跑方向，否则面向最近玩家
+    const tx = threat ? npc.x + (npc.x - threat.p[0]) : (near ? near.x : npc.x);
+    const tz = threat ? npc.z + (npc.z - threat.p[2]) : (near ? near.z : npc.z);
+    let targetYaw = Math.atan2(tx - npc.x, tz - npc.z);
+    let dy = targetYaw - npc.yaw;
+    while (dy > Math.PI) dy -= Math.PI * 2;
+    while (dy < -Math.PI) dy += Math.PI * 2;
+    npc.yaw += dy * 0.18;
+
+    // 随机说话（状态感知：交椅后换池）
+    if (t >= npc.nextLineAt) {
+      npc.nextLineAt = t + 9000 + Math.random() * 9000;
+      const pool = this.puzzle.chairGiven ? NPC_LINES.done
+        : near && nearD < 6 ? NPC_LINES.waiting : NPC_LINES.idle;
+      npc.line = pick(pool);
+      npc.lineUntil = t + 4000;
+    }
+  }
+
   /* ---------------- 快照 ---------------- */
 
   snap() {
@@ -615,6 +693,13 @@ export class Room {
       })),
       chaos: this.chaos,
       lowGrav: !!(this.lowGrav && t < this.lowGrav.until),
+      npc: {
+        x: +this.npc.x.toFixed(3),
+        z: +this.npc.z.toFixed(3),
+        yaw: +this.npc.yaw.toFixed(3),
+        scared: this.npc.scared,
+        line: t < this.npc.lineUntil ? this.npc.line : null,
+      },
       cooldowns: Object.fromEntries(this.players.map((p) => [
         p.id,
         {
@@ -639,6 +724,8 @@ export class Room {
     if (this.stats.tags >= 4) title = '标签枪狂魔';
     else if (this.stats.morphs >= 2) title = '物体体验家';
     else if (this.stats.copies >= 3) title = '无限复制批发商';
+    else if (this.stats.slips >= 2) title = '香蕉皮之友';
+    else if (this.stats.events >= 3) title = '随机事件磁铁';
     else if (this.stats.chaosPeak >= 60) title = '头号破坏王';
     this.feed(`${p.name} 按下了出口开关！`);
     this.broadcast('roundEnd', {

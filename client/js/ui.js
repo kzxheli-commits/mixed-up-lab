@@ -195,16 +195,18 @@ export class UI {
 
   showReport(r) {
     $('report').hidden = false;
-    $('report-body').innerHTML = `
-      <div class="big">${escapeHtml(r.by.name)} 按下了出口开关！</div>
-      <div>⏱ 用时：<b>${r.time}</b></div>
-      <div>🧩 完成谜题：<b>${r.puzzle.chairGiven + r.puzzle.corePowered + (r.puzzle.exitOpen ? 1 : 0)}/3</b></div>
-      <div>🏷 标签修改：<b>${r.stats.tags}</b> 次</div>
-      <div>📦 物化自己：<b>${r.stats.morphs}</b> 次</div>
-      <div>🚀 高速投掷：<b>${r.stats.throws}</b> 次</div>
-      <div>💥 混乱峰值：<b>${r.stats.chaosPeak}%</b></div>
-      <div>🏆 本局称号：<span class="title-badge">${escapeHtml(r.title)}</span></div>
-      <div style="color:#8fa3bd;font-size:13px">12 秒后自动返回大厅</div>`;
+    const s = r.stats;
+    const rows = [];
+    rows.push(`<div class="big">${escapeHtml(r.by.name)} 按下了出口开关！</div>`);
+    rows.push(`<div>⏱ 用时：<b>${r.time}</b></div>`);
+    rows.push(`<div>🧩 完成谜题：<b>${r.puzzle.chairGiven + r.puzzle.corePowered + (r.puzzle.exitOpen ? 1 : 0)}/3</b></div>`);
+    rows.push(`<div>🏷 标签修改：<b>${s.tags}</b> 次 · 📐 缩放：<b>${s.scaled ?? 0}</b> 次 · 📋 复制：<b>${s.copies ?? 0}</b> 次</div>`);
+    rows.push(`<div>📦 物化自己：<b>${s.morphs}</b> 次 · 🚀 高速投掷：<b>${s.throws}</b> 次</div>`);
+    rows.push(`<div>🐔 随机事件：<b>${s.events ?? 0}</b> 轮 · 🍌 踩香蕉：<b>${s.slips ?? 0}</b> 次 · 💥 失控爆飞：<b>${s.blasts ?? 0}</b> 次</div>`);
+    rows.push(`<div>💥 混乱峰值：<b>${s.chaosPeak}%</b></div>`);
+    rows.push(`<div>🏆 本局称号：<span class="title-badge">${escapeHtml(r.title)}</span></div>`);
+    rows.push(`<div style="color:#8fa3bd;font-size:13px">12 秒后自动返回大厅</div>`);
+    $('report-body').innerHTML = rows.join('');
   }
 }
 

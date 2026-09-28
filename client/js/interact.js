@@ -2,6 +2,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import * as CANNON from '../vendor/cannon-es.js';
 import { NPC, CORE_POS, ABILITIES, TAG_RULES } from './level.js';
+import { sfx } from './audio.js';
 
 const FORM_LABEL = { BOX: '箱子', CHAIR: '椅子', SPRING: '弹簧', LAMP: '灯', ORB: '能源球' };
 const FORM_KEYS = ['BOX', 'CHAIR', 'SPRING', 'LAMP'];
@@ -169,6 +170,7 @@ export class Interact {
     d.body.updateMassProperties();
     d.body.allowSleep = false;
     d.body.angularVelocity.set(0, 0, 0);
+    sfx.play('grab');
   }
 
   release() {
@@ -237,6 +239,7 @@ export class Interact {
     d.heldBy = null;
     d.body.allowSleep = true;
     this.held = null;
+    sfx.play('throw');
     this.net.send({ t: 'throw', v: [dir.x * speed, dir.y * speed, dir.z * speed] });
   }
 
@@ -244,11 +247,13 @@ export class Interact {
 
   _retag(form) {
     if (!this.target) return;
+    sfx.play('tag');
     this.net.send({ t: 'tag', objId: this.target, form });
   }
 
   _flipPair(pair) {
     if (!this.target) return;
+    sfx.play('tag');
     this.net.send({ t: 'tag', objId: this.target, pair });
   }
 
@@ -256,11 +261,13 @@ export class Interact {
 
   _scale(dir) {
     if (!this.target) return;
+    sfx.play('scale');
     this.net.send({ t: 'scale', objId: this.target, dir });
   }
 
   _copy() {
     if (!this.target) return;
+    sfx.play('copy');
     this.net.send({ t: 'copy', objId: this.target });
   }
 
@@ -279,6 +286,7 @@ export class Interact {
       if (d) { d.heldBy = null; d.body.allowSleep = true; }
       this.held = null;
     }
+    sfx.play('error');
     this.ui.toast(msg);
   }
 }

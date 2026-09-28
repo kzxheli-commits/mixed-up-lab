@@ -200,6 +200,28 @@ export function buildPlayerMesh(color, form) {
   return g;
 }
 
+// NPC 头顶气泡（台词随服务器快照更新）
+function buildBubble(text) {
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 160;
+  const g = cv.getContext('2d');
+  g.textAlign = 'center';
+  let fs = 42;
+  g.font = `bold ${fs}px "Microsoft YaHei", sans-serif`;
+  let w = g.measureText(text).width + 60;
+  while (fs > 20 && w > 496) {
+    fs -= 2;
+    g.font = `bold ${fs}px "Microsoft YaHei", sans-serif`;
+    w = g.measureText(text).width + 60;
+  }
+  w = Math.min(496, w);
+  g.fillStyle = 'rgba(255,255,255,0.95)';
+  g.beginPath(); g.roundRect((512 - w) / 2, 8, w, 104, 28); g.fill();
+  g.fillStyle = '#22303f';
+  g.fillText(text, 256, 74);
+  return new THREE.CanvasTexture(cv);
+}
+
 function nameSprite(name, color) {
   const cv = document.createElement('canvas');
   cv.width = 256; cv.height = 64;
@@ -539,22 +561,12 @@ export class Game {
     g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     this.scene.add(g);
     this.npc = { group: g, seatY: 0 };
-    // NPC 气泡
-    const bubbleCv = document.createElement('canvas');
-    bubbleCv.width = 512; bubbleCv.height = 160;
-    const bg = bubbleCv.getContext('2d');
-    bg.font = 'bold 44px "Microsoft YaHei", sans-serif';
-    bg.textAlign = 'center';
-    bg.fillStyle = 'rgba(255,255,255,0.95)';
-    bg.beginPath(); bg.roundRect(6, 6, 500, 110, 30); bg.fill();
-    bg.fillStyle = '#22303f';
-    bg.fillText('我需要一把椅子！', 256, 78);
-    const bubbleTex = new THREE.CanvasTexture(bubbleCv);
-    const bubble = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubbleTex, depthTest: false }));
+    const bubble = new THREE.Sprite(new THREE.SpriteMaterial({ map: buildBubble('我需要一把椅子！'), depthTest: false }));
     bubble.scale.set(2.6, 0.82, 1);
     bubble.position.y = 2.4;
     g.add(bubble);
     this.npc.bubble = bubble;
+    this.npcState = null;
 
     // 核心插槽
     const cg = new THREE.Group();
@@ -710,6 +722,24 @@ export class Game {
     }
   }
 
+  /* ---------------- NPC 快照应用 ---------------- */
+
+  setNpc(s) {
+    if (!s || !this.npc) return;
+    const prev = this.npcState;
+    this.npcState = s;
+    if (s.line && (!prev || prev.line !== s.line)) {
+      const tex = buildBubble(s.line);
+      const old = this.npc.bubble.material.map;
+      this.npc.bubble.material.map = tex;
+      this.npc.bubble.material.needsUpdate = true;
+      if (old) old.dispose();
+      this.npc.bubble.visible = true;
+    } else if (!s.line && prev && prev.line) {
+      this.npc.bubble.visible = false;
+    }
+  }
+
   /* ---------------- 门 / 谜题视觉 ---------------- */
 
   setPuzzle(puzzle) {
@@ -717,7 +747,6 @@ export class Game {
     this.doors.side && (this.doors.side.open = puzzle.sideDoorOpen);
 
     if (this.npc) {
-      this.npc.bubble.visible = !puzzle.chairGiven;
       const target = puzzle.chairGiven ? -0.45 : 0;
       this.npc.seatY = target; // step 中 lerp
     }
@@ -835,10 +864,27 @@ export class Game {
       }
     }
 
-    // NPC 坐下动画
+    // NPC：坐下动画 + 位置/朝向跟随服务器 AI + 台词气泡
     if (this.npc) {
       const g = this.npc.group;
       g.position.y += (this.npc.seatY - g.position.y) * Math.min(1, dt * 4);
+      const s = this.npcState;
+      if (s) {
+        const k = Math.min(1, dt * 6);
+        g.position.x += (s.x - g.position.x) * k;
+        g.position.z += (s.z - g.position.z) * k;
+        let dy = s.yaw - g.rotation.y;
+        while (dy > Math.PI) dy -= Math.PI * 2;
+        while (dy < -Math.PI) dy += Math.PI * 2;
+        g.rotation.y += dy * k;
+        if (s.scared) {
+          // 被鸡吓到：原地蹦跳
+          g.position.y = this.npc.seatY + Math.abs(Math.sin(performance.now() / 85)) * 0.09;
+          g.rotation.z = Math.sin(performance.now() / 60) * 0.12;
+        } else {
+          g.rotation.z += (0 - g.rotation.z) * k;
+        }
+      }
     }
 
     // 风扇

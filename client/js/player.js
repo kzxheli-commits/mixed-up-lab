@@ -3,6 +3,7 @@ import * as THREE from '../vendor/three.module.min.js';
 import * as CANNON from '../vendor/cannon-es.js';
 import { buildPlayerMesh } from './game.js';
 import { ROOM } from './level.js';
+import { sfx } from './audio.js';
 
 const HUMAN_R = 0.42;
 const BOX_HALF = 0.4;
@@ -135,6 +136,7 @@ export class Player {
     if (this.enabled && this.locked && !this.chatOpen
       && this.keys.has('Space') && grounded && this.form === 'human') {
       body.velocity.y = JUMP;
+      sfx.play('jump');
     }
 
     // 墙体边界（补充碰撞，防高速穿墙）
