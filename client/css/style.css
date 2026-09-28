@@ -1,6 +1,9 @@
 /* 乱序实验室 —— 明亮卡通风格 UI */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* hidden 属性必须压过 .overlay 的 display:flex（rune-vault 同款教训：163c7bf） */
+[hidden] { display: none !important; }
+
 :root {
   --accent: #ffd43b;
   --mint: #38d9a9;

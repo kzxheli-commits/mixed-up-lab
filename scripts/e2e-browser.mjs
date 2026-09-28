@@ -72,6 +72,13 @@ async function main() {
     if (!ready) throw new Error('页面未暴露 __MUL（客户端脚本可能启动失败）');
     console.log('== 页面就绪，开始浏览器端通关 ==');
 
+    // 结算页初始必须不可见：.overlay{display:flex} 曾覆盖 hidden 属性导致卡片常显盖死整个界面
+    const vis = await evaluate(
+      "getComputedStyle(document.getElementById('report')).display"
+    );
+    if (vis.result.value !== 'none') throw new Error(`结算页初始可见（display=${vis.result.value}），hidden 被 .overlay 覆盖`);
+    console.log('  PASS  结算页初始不可见（[hidden] 压过 .overlay）');
+
     const expr = `(() => {
       const M = window.__MUL;
       const log = [];
