@@ -73,10 +73,11 @@ export class UI {
     }
     const startBtn = $('btn-start');
     startBtn.hidden = hostId !== myId;
-    startBtn.disabled = players.filter((p) => !p.dc).length < 2;
+    const alive = players.filter((p) => !p.dc).length;
+    startBtn.disabled = alive < 1;
     $('lobby-hint').textContent = startBtn.hidden
-      ? '等待房主开始…'
-      : players.filter((p) => !p.dc).length < 2 ? '还需要至少 1 名玩家' : '点击开始进入实验';
+      ? (alive < 2 ? '队友还没来 —— 房主也可以先单人开始' : '等待房主开始…')
+      : alive < 2 ? '单人即可开始（邀请朋友 2~4 人更欢乐）' : '点击开始进入实验';
   }
 
   /* ---------------- HUD ---------------- */

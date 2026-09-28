@@ -44,6 +44,7 @@ try {
   const suites = [
     ['DOM 静态校验', ['scripts/check-dom.mjs']],
     ['服务端全流程（通关）', ['scripts/test-server.mjs', `ws://127.0.0.1:${port}/ws`]],
+    ['单人开始', ['scripts/test-solo.mjs', `ws://127.0.0.1:${port}/ws`]],
     ['三按钮协作谜题', ['scripts/test-buttons.mjs', `ws://127.0.0.1:${port}/ws`]],
     ['事件与新能力（复制/缩放/随机事件）', ['scripts/test-events.mjs', `ws://127.0.0.1:${port2}/ws`]],
     ['浏览器端 e2e（真实页面通关）', ['scripts/e2e-browser.mjs', `http://127.0.0.1:${port}`]],

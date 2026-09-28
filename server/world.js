@@ -129,7 +129,7 @@ export class Room {
     if (id !== this.hostId) return '只有房主可以开始';
     if (this.phase !== 'lobby') return '对局已经开始';
     const live = this.players.filter((p) => !p.dc);
-    if (live.length < 2) return '至少需要 2 名玩家';
+    if (live.length < 1) return '房间内没有可开始的玩家';
 
     this.phase = 'playing';
     this._clearWorldTimers();
