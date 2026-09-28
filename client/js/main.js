@@ -30,9 +30,15 @@ const ui = new UI({
   },
 });
 
-// 运行时错误直接显示在大厅，避免静默失败
-addEventListener('error', (e) => ui.lobbyError(`脚本错误: ${e.message}`));
-addEventListener('unhandledrejection', (e) => ui.lobbyError(`异步错误: ${e.reason?.message || e.reason}`));
+// 运行时错误直接显示在大厅，避免静默失败；同时上报服务器（F12 红字自动到达日志）
+addEventListener('error', (e) => {
+  ui.lobbyError(`脚本错误: ${e.message}`);
+  net.send({ t: 'logerr', msg: `${e.message} @${e.filename || ''}:${e.lineno || ''}` });
+});
+addEventListener('unhandledrejection', (e) => {
+  ui.lobbyError(`异步错误: ${e.reason?.message || e.reason}`);
+  net.send({ t: 'logerr', msg: `rejection: ${e.reason?.message || e.reason}` });
+});
 
 const canvas = document.getElementById('c');
 const game = new Game(canvas);
@@ -81,6 +87,8 @@ net.on('joined', (m) => {
   roomCode = m.code;
   state = 'room';
   ui.lobbyError('');
+  const tag = document.getElementById('build-tag');
+  if (tag) tag.textContent = `v${net.build || '?'}`;
 });
 
 net.on('lobby', (m) => {
@@ -311,14 +319,12 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (state === 'playing' || state === 'done') {
+  if (state === 'playing') {
     player.update(dt);
     game.step(dt, player.body);
-    if (state === 'playing') interact.update();
-    else { ui.prompt(null); ui.tagPanel(null); }
-  } else {
-    game.step(dt, null);
+    interact.update();
   }
+  // menu / room / done 状态下 overlay 全遮挡：暂停 3D 渲染，省资源并消除 rAF Violation
   requestAnimationFrame(frame);
 }
 

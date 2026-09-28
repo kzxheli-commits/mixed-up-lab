@@ -107,6 +107,11 @@ async function main() {
   check(end.puzzle.buttonOpen === true, '结算 puzzle 携带 buttonOpen');
   check(end.by.name === 'Alice', `触发者 ${end.by.name}`);
 
+  console.log('== backLobby 快速返回 ==');
+  B.send({ t: 'backLobby' });
+  const back = await A.wait((m) => m.t === 'lobby' && m.phase === 'lobby', 4000, 'backLobby');
+  check(back.phase === 'lobby', 'backLobby 消息立即结束结算回大厅');
+
   A.ws.close(); B.ws.close();
   console.log(failures === 0 ? '\nBUTTON TESTS PASSED' : `\n${failures} BUTTON TEST(S) FAILED`);
   process.exit(failures === 0 ? 0 : 1);

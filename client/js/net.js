@@ -27,7 +27,7 @@ export class Net {
       this.ws.onmessage = (e) => {
         let m;
         try { m = JSON.parse(e.data); } catch { return; }
-        if (m.t === 'hello') this.myId = m.id;
+        if (m.t === 'hello') { this.myId = m.id; this.build = m.build || '?'; }
         this._emit(m.t, m);
       };
     });

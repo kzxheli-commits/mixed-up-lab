@@ -203,10 +203,12 @@ async function main() {
         check(document.getElementById('feed').children.length > 0, '事件 feed 有内容');
         check(document.getElementById('chat-log').children.length >= 0, '聊天区就绪');
 
-        // 13. 结算不卡死：点「返回大厅」应立刻回大厅（修复前是空函数 → 卡在报告页）
-        document.getElementById('btn-report-back').click();
-        check(await wait(() => document.getElementById('report').hidden
-          && !document.getElementById('lobby').hidden, 6000, 'back lobby'), '点返回大厅立即回到大厅界面');
+        // 13. 结算不卡死：不点按钮，12 秒自动回大厅必须在 UI 层生效（对应"卡在结束页面"反馈）
+        check(await wait(
+          () => document.getElementById('report').hidden && !document.getElementById('lobby').hidden,
+          15000, 'auto back lobby'
+        ), '结算 12s 后自动回到大厅界面（不卡结算页）');
+        check(M.state === 'room', '状态机回到 room');
 
         bob.close();
         return { log, failures };

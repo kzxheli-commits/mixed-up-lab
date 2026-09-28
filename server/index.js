@@ -12,6 +12,12 @@ const PORT = Number(process.env.PORT) || 3000;
 // 随机事件首个触发延迟（毫秒）；0 = 禁用随机事件
 const EVENT_MS = process.env.EVENT_MS !== undefined ? Number(process.env.EVENT_MS) : 40_000;
 
+// 版本号下发给客户端显示，用于一眼识别旧缓存页面
+let SERVER_BUILD = 'dev';
+try {
+  SERVER_BUILD = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+} catch { /* 忽略 */ }
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -121,9 +127,15 @@ function handle(ws, raw) {
     case 'unmorph': error = room.handleUnmorph(conn.id); break;
     case 'interact': error = room.handleInteract(conn.id, msg.target); break;
     case 'chat': error = room.chat(conn.id, msg.text); break;
+    case 'logerr':
+      console.log(`[client-err] ${conn.name || conn.id}: ${String(msg.msg || '').slice(0, 300)}`);
+      break;
     case 'backLobby':
       // 结算页「返回大厅」：立即结束展示回大厅（不等 12 秒）
-      if (room.phase === 'done') room.toLobby();
+      if (room.phase === 'done') {
+        console.log(`[backLobby] room=${room.code} by=${conn.name || conn.id}`);
+        room.toLobby();
+      }
       break;
     case 'leave':
       room.removePlayer(conn.id);
@@ -148,6 +160,7 @@ function disconnect(ws) {
   const conn = conns.get(ws);
   if (!conn) return;
   conns.delete(ws);
+  if (conn.code) console.log(`[dc] ${conn.name || conn.id} left ${conn.code}`);
   const room = conn.code ? rooms.get(conn.code) : null;
   if (room) {
     room.markDisconnected(conn.id);
@@ -165,7 +178,7 @@ let nextId = 1;
 wss.on('connection', (ws) => {
   const id = `p${nextId++}`;
   conns.set(ws, { id, code: null, name: null });
-  ws.send(JSON.stringify({ t: 'hello', id }));
+  ws.send(JSON.stringify({ t: 'hello', id, build: SERVER_BUILD }));
   ws.on('message', (raw) => {
     try { handle(ws, raw.toString()); } catch (e) { console.error('handle error', e); }
   });

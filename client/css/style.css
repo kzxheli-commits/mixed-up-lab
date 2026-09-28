@@ -65,6 +65,7 @@ button.primary { background: linear-gradient(180deg, #ffe066, #ffb703); color: #
 #room-box { margin-top: 18px; }
 .code-line { font-size: 14px; color: #9fb2c9; margin-bottom: 10px; }
 .code-line b { font-size: 26px; letter-spacing: 6px; color: var(--accent); }
+.build-tag { font-size: 11px; color: #5b6b81; letter-spacing: 1px; }
 #player-list { list-style: none; text-align: left; margin: 6px 0 12px; }
 #player-list li {
   display: flex; align-items: center; gap: 8px;

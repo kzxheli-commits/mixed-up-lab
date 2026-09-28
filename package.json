@@ -1,6 +1,6 @@
 {
   "name": "mixed-up-lab",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "乱序实验室 Mixed Up Lab — 3D 多人欢乐规则解谜游戏",
   "type": "module",
   "scripts": {
