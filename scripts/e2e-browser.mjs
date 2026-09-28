@@ -110,6 +110,9 @@ async function main() {
       const bobWait = async (fn, ms = 6000, label = 'bob') => wait(() => bobMsgs.some(fn), ms, label);
 
       return (async () => {
+        // 捕获 roundEnd 原始消息与 showReport 异常，用于诊断结算渲染
+        M.net.on('roundEnd', (m) => { window.__roundEnd = m; });
+
         // 1. Alice 创建房间
         M.net.send({ t: 'create', name: 'Alice' });
         check(await wait(() => M.roomCode, 5000, 'joined'), 'Alice 创建房间 ' + M.roomCode);
@@ -182,7 +185,18 @@ async function main() {
         await tp(9.5, 1.2, 0);
         check(await wait(() => M.state === 'done', 6000, 'roundEnd'), '通关触发结算');
         check(!document.getElementById('report').hidden, '实验报告界面显示');
-        check(/实验完成/.test(document.getElementById('report').innerHTML), '报告内容渲染');
+        const body = document.getElementById('report-body');
+        check(body.children.length >= 6, '报告统计行渲染（' + body.children.length + ' 行）');
+        const raw = window.__roundEnd;
+        check(!!raw && !!raw.stats, 'roundEnd 原始消息带 stats（' + (raw ? typeof raw.stats : '无消息') + '）');
+        if (raw) {
+          try {
+            M.ui.showReport(raw);
+          } catch (e) {
+            log.push('  FAIL  showReport 抛异常: ' + e.message);
+            failures++;
+          }
+        }
 
         // 12. HUD 状态
         check(document.querySelectorAll('#quests li').length === 4, '任务清单 4 项');

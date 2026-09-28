@@ -37,7 +37,11 @@ const server = http.createServer((req, res) => {
       return;
     }
     const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      // 禁缓存：避免客户端拿着旧版 JS 与新服务器协议漂移
+      'Cache-Control': 'no-cache, must-revalidate',
+    });
     res.end(data);
   });
 });

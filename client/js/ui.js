@@ -195,18 +195,27 @@ export class UI {
 
   showReport(r) {
     $('report').hidden = false;
-    const s = r.stats;
-    const rows = [];
-    rows.push(`<div class="big">${escapeHtml(r.by.name)} 按下了出口开关！</div>`);
-    rows.push(`<div>⏱ 用时：<b>${r.time}</b></div>`);
-    rows.push(`<div>🧩 完成谜题：<b>${r.puzzle.chairGiven + r.puzzle.corePowered + (r.puzzle.exitOpen ? 1 : 0)}/3</b></div>`);
-    rows.push(`<div>🏷 标签修改：<b>${s.tags}</b> 次 · 📐 缩放：<b>${s.scaled ?? 0}</b> 次 · 📋 复制：<b>${s.copies ?? 0}</b> 次</div>`);
-    rows.push(`<div>📦 物化自己：<b>${s.morphs}</b> 次 · 🚀 高速投掷：<b>${s.throws}</b> 次</div>`);
-    rows.push(`<div>🐔 随机事件：<b>${s.events ?? 0}</b> 轮 · 🍌 踩香蕉：<b>${s.slips ?? 0}</b> 次 · 💥 失控爆飞：<b>${s.blasts ?? 0}</b> 次</div>`);
-    rows.push(`<div>💥 混乱峰值：<b>${s.chaosPeak}%</b></div>`);
-    rows.push(`<div>🏆 本局称号：<span class="title-badge">${escapeHtml(r.title)}</span></div>`);
-    rows.push(`<div style="color:#8fa3bd;font-size:13px">12 秒后自动返回大厅</div>`);
-    $('report-body').innerHTML = rows.join('');
+    try {
+      const s = r.stats || {};
+      const pz = r.puzzle || {};
+      const rows = [];
+      rows.push(`<div class="big">${escapeHtml(r.by?.name || '？')} 按下了出口开关！</div>`);
+      rows.push(`<div>⏱ 用时：<b>${r.time || '—'}</b></div>`);
+      rows.push(`<div>🧩 完成谜题：<b>${(pz.chairGiven ? 1 : 0) + (pz.corePowered ? 1 : 0) + (pz.exitOpen ? 1 : 0)}/3</b></div>`);
+      rows.push(`<div>🏷 标签修改：<b>${s.tags ?? 0}</b> 次 · 📐 缩放：<b>${s.scaled ?? 0}</b> 次 · 📋 复制：<b>${s.copies ?? 0}</b> 次</div>`);
+      rows.push(`<div>📦 物化自己：<b>${s.morphs ?? 0}</b> 次 · 🚀 高速投掷：<b>${s.throws ?? 0}</b> 次</div>`);
+      rows.push(`<div>🐔 随机事件：<b>${s.events ?? 0}</b> 轮 · 🍌 踩香蕉：<b>${s.slips ?? 0}</b> 次 · 💥 失控爆飞：<b>${s.blasts ?? 0}</b> 次</div>`);
+      rows.push(`<div>💥 混乱峰值：<b>${s.chaosPeak ?? 0}%</b></div>`);
+      rows.push(`<div>🏆 本局称号：<span class="title-badge">${escapeHtml(r.title || '实验室模范生')}</span></div>`);
+      rows.push(`<div style="color:#8fa3bd;font-size:13px">12 秒后自动返回大厅</div>`);
+      $('report-body').innerHTML = rows.join('');
+    } catch (e) {
+      // 兜底：绝不留空白卡片
+      window.__reportError = e.message;
+      $('report-body').innerHTML =
+        `<div>结算数据显示异常：${escapeHtml(e.message)}</div>`
+        + '<div style="color:#8fa3bd;font-size:13px">刷新页面（Ctrl+F5）可修复缓存导致的版本不一致</div>';
+    }
   }
 }
 
