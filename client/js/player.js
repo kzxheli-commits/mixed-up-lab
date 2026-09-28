@@ -77,16 +77,39 @@ export class Player {
 
   _bindInput() {
     const canvas = this.game.canvas;
+
+    // 点击尝试锁定鼠标；失败时给明确提示（DevTools 开着等情况会拒绝锁定）
     canvas.addEventListener('click', () => {
-      if (this.enabled && !this.locked && !this.chatOpen) canvas.requestPointerLock();
+      if (!this.enabled || this.locked || this.chatOpen) return;
+      try {
+        const p = canvas.requestPointerLock?.();
+        if (p && typeof p.catch === 'function') p.catch(() => this.onLockFail?.());
+      } catch { this.onLockFail?.(); }
     });
+    document.addEventListener('pointerlockerror', () => this.onLockFail?.());
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === canvas;
+      if (this.locked) this._drag = null;
     });
+
+    // 未锁定时：按住画面拖动即可转视角（Pointer Lock 失效时的兜底操作）
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || !this.enabled || this.locked || this.chatOpen) return;
+      this._drag = { x: e.clientX, y: e.clientY };
+    });
+    document.addEventListener('mouseup', () => { this._drag = null; });
+
     document.addEventListener('mousemove', (e) => {
-      if (!this.locked) return;
-      this.yaw -= e.movementX * 0.0026;
-      this.pitch -= e.movementY * 0.0026;
+      if (this.locked) {
+        this.yaw -= e.movementX * 0.0026;
+        this.pitch -= e.movementY * 0.0026;
+      } else if (this._drag && this.enabled && !this.chatOpen) {
+        this.yaw -= (e.clientX - this._drag.x) * 0.006;
+        this.pitch -= (e.clientY - this._drag.y) * 0.006;
+        this._drag = { x: e.clientX, y: e.clientY };
+      } else {
+        return;
+      }
       this.pitch = Math.max(-1.15, Math.min(0.7, this.pitch));
     });
     addEventListener('keydown', (e) => {
@@ -179,7 +202,8 @@ export class Player {
     this._ray.to = to;
     this._ray.skipBackfaces = true;
     this._ray.intersectWorld(this.game.world, { result: this._rayResult, mode: CANNON.Ray.CLOSEST });
-    return this._rayResult.hasHit && this._rayResult.normal.y > 0.35;
+    // cannon-es 的法线字段是 hitNormalWorld（曾误写 normal 导致落地瞬间 rAF 崩溃）
+    return this._rayResult.hasHit && this._rayResult.hitNormalWorld.y > 0.35;
   }
 
   /* ---------------- 事件接触：香蕉皮 / 鸡（设计书 §25） ---------------- */

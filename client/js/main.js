@@ -80,6 +80,7 @@ player.onSlip = () => {
   ui.toast('滑——！');
 };
 player.onPeck = () => { sfx.play('peck'); ui.toast('被鸡撞了！'); };
+player.onLockFail = () => ui.toast('鼠标锁定失败 —— 按住画面拖动即可转视角（开着 F12 的话建议关闭后重试）');
 
 /* ---------------- 网络消息 ---------------- */
 
@@ -317,14 +318,24 @@ setInterval(() => {
 
 let last = performance.now();
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
-  if (state === 'playing') {
-    player.update(dt);
-    game.step(dt, player.body);
-    interact.update();
+  // 渲染循环绝不能死：任何异常上报并降级继续（曾因一行字段名错误冻结整个游戏）
+  try {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (state === 'playing') {
+      player.update(dt);
+      game.step(dt, player.body);
+      interact.update();
+    }
+    // menu / room / done 状态下 overlay 全遮挡：暂停 3D 渲染，省资源并消除 rAF Violation
+  } catch (e) {
+    const t = performance.now();
+    if (!frame._errAt || t - frame._errAt > 3000) {
+      frame._errAt = t;
+      console.error('[frame]', e);
+      net.send({ t: 'logerr', msg: `rAF: ${e.message} ${(e.stack || '').split('\n')[1] || ''}` });
+    }
   }
-  // menu / room / done 状态下 overlay 全遮挡：暂停 3D 渲染，省资源并消除 rAF Violation
   requestAnimationFrame(frame);
 }
 

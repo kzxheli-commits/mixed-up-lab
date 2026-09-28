@@ -137,6 +137,12 @@ async function main() {
         check(M.game.dynamics.size === 7, '场景生成 7 个动态物体');
         check(M.player.enabled === true, '本地玩家获得控制权');
 
+        // 渲染循环存活断言：rAF 内异常曾冻结整个游戏（落地时 normal 字段名错误）
+        const f1 = M.game.renderer.info.render.frame;
+        await sleep(700);
+        const f2 = M.game.renderer.info.render.frame;
+        check(f2 > f1 + 5, '渲染循环存活（rAF 帧 ' + f1 + ' -> ' + f2 + '）');
+
         // 4. 标签枪：传送到 box2 旁改成 CHAIR（headless 无鼠标锁，射线 target 不可用，走协议层）
         await tp(-2, 1.2, 3.4);
         await sleep(250); // 等 pose 到达服务器
