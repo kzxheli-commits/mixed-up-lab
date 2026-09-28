@@ -17,6 +17,7 @@ export class Player {
     game.camera = this.camera;
 
     this.form = 'human';
+    this.giant = false;      // 巨型玩家事件
     this.yaw = Math.PI;       // 相机水平角
     this.pitch = -0.25;
     this.keys = new Set();
@@ -58,6 +59,7 @@ export class Player {
     // 重建颜色（visual 是 group）
     this.game.scene.remove(this.visual);
     this.visual = buildPlayerMesh(color, this.form);
+    if (this.giant) this.visual.scale.setScalar(2);
     this.game.scene.add(this.visual);
     this.yaw = Math.PI;
     this.pitch = -0.25;
@@ -66,6 +68,7 @@ export class Player {
   setColor(color) {
     this.game.scene.remove(this.visual);
     this.visual = buildPlayerMesh(color, this.form);
+    if (this.giant) this.visual.scale.setScalar(2);
     this.game.scene.add(this.visual);
   }
 
@@ -106,7 +109,7 @@ export class Player {
     const grounded = this._grounded();
 
     // 移动方向（相对相机）
-    const speed = this.form === 'box' ? BOX_WALK : WALK;
+    const speed = (this.form === 'box' ? BOX_WALK : WALK) * (this.giant ? 1.25 : 1);
     let mx = 0, mz = 0;
     if (this.enabled && this.locked && !this.chatOpen) {
       if (this.keys.has('KeyW')) mz -= 1;
@@ -149,6 +152,8 @@ export class Player {
     this.visual.position.set(p.x, footY, p.z);
     this.visual.rotation.y = this.yaw + Math.PI; // 面向相机前方
 
+    this._chaosContacts(dt, footY);
+
     const headY = footY + 1.55;
     const back = 3.4, shoulder = 0.55;
     const cosP = Math.cos(this.pitch), sinP = Math.sin(this.pitch);
@@ -173,6 +178,60 @@ export class Player {
     this._ray.skipBackfaces = true;
     this._ray.intersectWorld(this.game.world, { result: this._rayResult, mode: CANNON.Ray.CLOSEST });
     return this._rayResult.hasHit && this._rayResult.normal.y > 0.35;
+  }
+
+  /* ---------------- 事件接触：香蕉皮 / 鸡（设计书 §25） ---------------- */
+
+  _chaosContacts(dt, footY) {
+    const t = performance.now();
+    const p = this.body.position;
+
+    // 香蕉皮：踩上滑行并上报混乱值（服务器限速）
+    if (footY < 0.35 && t - (this._slipAt || 0) > 1400) {
+      for (const d of this.game.dynamics.values()) {
+        if (d.removed || d.def.kind !== 'banana') continue;
+        if (Math.abs(p.x - d.body.position.x) < 0.65 && Math.abs(p.z - d.body.position.z) < 0.65) {
+          const sp = Math.hypot(this.body.velocity.x, this.body.velocity.z);
+          if (sp > 0.6) {
+            this.body.velocity.x *= 2.6;
+            this.body.velocity.z *= 2.6;
+          } else {
+            const a = Math.random() * Math.PI * 2;
+            this.body.velocity.x = Math.cos(a) * 7;
+            this.body.velocity.z = Math.sin(a) * 7;
+          }
+          this._slipAt = t;
+          this.onSlip?.();
+          break;
+        }
+      }
+    }
+
+    // 鸡撞人：本地给自己一个小冲量（每 0.8 秒至多一次）
+    if (t - (this._peckAt || 0) > 800) {
+      for (const d of this.game.dynamics.values()) {
+        if (d.removed || d.def.kind !== 'chicken') continue;
+        const dx = p.x - d.body.position.x;
+        const dz = p.z - d.body.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.85 && dist > 0.01) {
+          this.body.velocity.x += (dx / dist) * 3.4;
+          this.body.velocity.z += (dz / dist) * 3.4;
+          if (this.body.velocity.y < 1) this.body.velocity.y = 2.2;
+          this._peckAt = t;
+          this.onPeck?.();
+          break;
+        }
+      }
+    }
+  }
+
+  /* ---------------- 巨型玩家事件 ---------------- */
+
+  setGiant(on) {
+    if (this.giant === !!on) return;
+    this.giant = !!on;
+    this.visual.scale.setScalar(this.giant ? 2 : 1);
   }
 
   /* ---------------- 物化 ---------------- */
@@ -213,6 +272,7 @@ export class Player {
 
     this.game.scene.remove(this.visual);
     this.visual = buildPlayerMesh(color || '#ff6b6b', form);
+    if (this.giant) this.visual.scale.setScalar(2);
     this.game.scene.add(this.visual);
   }
 

@@ -26,6 +26,9 @@ export class Interact {
       if (e.code === 'KeyE') this.smartE();
       if (e.code === 'KeyR') this._flipPair('HEAVY');
       if (e.code === 'KeyT') this._flipPair('MOVABLE');
+      if (e.code === 'KeyZ') this._scale(+1);
+      if (e.code === 'KeyX') this._scale(-1);
+      if (e.code === 'KeyG') this._copy();
       const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
       if (idx >= 0) this._retag(FORM_KEYS[idx]);
     });
@@ -89,18 +92,16 @@ export class Interact {
     if (d && p.locked) {
       const dist = bp.distanceTo(d.body.position);
       if (dist <= ABILITIES.tagGun.range) {
-        const pairs = d.tags.includes('HEAVY') ? ['HEAVY', 'LIGHT']
-          : d.tags.includes('LIGHT') ? ['HEAVY', 'LIGHT']
-            : d.tags.includes('MOVABLE') ? ['MOVABLE', 'STATIC']
-              : ['MOVABLE', 'STATIC'];
         this.ui.tagPanel(`
           <b>${this._name(d)}</b> 标签枪
           ${FORM_KEYS.map((f, i) => `<span class="tag ${d.form === f ? 'hot' : ''}">${i + 1} ${FORM_LABEL[f]}</span>`).join('')}
           <br>
-          <span class="tag ${pairs[0] === (d.tags.includes('HEAVY') ? 'HEAVY' : d.tags.includes('LIGHT') ? 'LIGHT' : pairs[0]) ? 'hot' : ''}">${d.tags.includes('HEAVY') ? 'HEAVY 重' : d.tags.includes('LIGHT') ? 'LIGHT 轻' : pairs[0]}</span>
+          <span class="tag ${d.tags.includes('HEAVY') || d.tags.includes('LIGHT') ? 'hot' : ''}">${d.tags.includes('HEAVY') ? 'HEAVY 重' : 'LIGHT 轻'}</span>
           <span class="tag">R 翻转</span>
           <span class="tag ${d.tags.includes('STATIC') ? '' : 'hot'}">${d.tags.includes('STATIC') ? 'STATIC 固定' : 'MOVABLE 可动'}</span>
           <span class="tag">T 翻转</span>
+          <br>
+          <span class="tag">Z 放大</span><span class="tag">X 缩小</span><span class="tag">G 复制</span>
         `);
       } else {
         this.ui.tagPanel(null);
@@ -251,6 +252,18 @@ export class Interact {
     this.net.send({ t: 'tag', objId: this.target, pair });
   }
 
+  /* ---------------- 缩放枪 / 复制枪（设计书 §14.2/14.3） ---------------- */
+
+  _scale(dir) {
+    if (!this.target) return;
+    this.net.send({ t: 'scale', objId: this.target, dir });
+  }
+
+  _copy() {
+    if (!this.target) return;
+    this.net.send({ t: 'copy', objId: this.target });
+  }
+
   onTagApplied(objId, form, tags) {
     // 服务器确认：本地乐观状态与正式状态对齐（视觉重建在 game.applyTag）
     if (this.held === objId) {
@@ -260,8 +273,8 @@ export class Interact {
   }
 
   onServerError(msg) {
-    // 抓取被服务器拒绝时回滚本地乐观持有
-    if (/抓|距离|固定|持有|手上/.test(msg)) {
+    // 抓取被服务器拒绝时回滚本地乐观持有（消息带"抓取失败"前缀才回滚，避免误伤其他能力）
+    if (/抓取失败|手上已有物体|物化状态下/.test(msg)) {
       const d = this.held && this.game.dynamics.get(this.held);
       if (d) { d.heldBy = null; d.body.allowSleep = true; }
       this.held = null;

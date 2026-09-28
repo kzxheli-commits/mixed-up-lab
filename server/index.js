@@ -9,6 +9,8 @@ import { Room, createRoomCode } from './world.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIR = path.join(__dirname, '..', 'client');
 const PORT = Number(process.env.PORT) || 3000;
+// 随机事件首个触发延迟（毫秒）；0 = 禁用随机事件
+const EVENT_MS = process.env.EVENT_MS !== undefined ? Number(process.env.EVENT_MS) : 40_000;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -73,7 +75,7 @@ function handle(ws, raw) {
     let room;
     if (t === 'create') {
       const code = makeCode();
-      room = new Room(code, { send: broadcastTo });
+      room = new Room(code, { send: broadcastTo, eventMs: EVENT_MS });
       rooms.set(code, room);
     } else {
       const code = String(msg.code || '').toUpperCase().trim();
@@ -107,6 +109,9 @@ function handle(ws, raw) {
     case 'release': error = room.handleRelease(conn.id); break;
     case 'throw': error = room.handleThrow(conn.id, msg.v); break;
     case 'tag': error = room.handleTag(conn.id, msg); break;
+    case 'scale': error = room.handleScale(conn.id, msg); break;
+    case 'copy': error = room.handleCopy(conn.id, msg); break;
+    case 'chaosEvent': error = room.handleChaosEvent(conn.id, msg.type); break;
     case 'morph': error = room.handleMorph(conn.id); break;
     case 'unmorph': error = room.handleUnmorph(conn.id); break;
     case 'interact': error = room.handleInteract(conn.id, msg.target); break;

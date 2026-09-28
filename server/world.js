@@ -2,18 +2,28 @@
 // 客户端只上报意图与模拟结果，规则判定全部在此完成。
 import {
   ROOM, SPAWNS, EXIT, PLATE1, OBJECTS, TAG_RULES, ABILITIES, CHAOS_EVENTS,
+  RANDOM_EVENTS, SCALE_LEVELS,
 } from '../client/js/level.js';
 
 const now = () => Date.now();
 const dist3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 const dist2 = (a, x, z) => Math.hypot(a[0] - x, a[2] - z);
 const clone = (v) => JSON.parse(JSON.stringify(v));
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const shuffle = (arr) => {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
 
 export class Room {
   constructor(code, opts = {}) {
     this.code = code;
     this.send = opts.send || (() => {});
-    this.players = [];   // {id,name,color,x,y,z,yaw,form,formUntil,hold,tagCd,morphCd,dc}
+    this.players = [];   // {id,name,color,x,y,z,yaw,form,formUntil,hold,tagCd,scaleCd,copyCd,morphCd,dc}
     this.hostId = null;
     this.phase = 'lobby';
     this.objects = [];
@@ -23,6 +33,14 @@ export class Room {
     this.stats = null;
     this.startedAt = 0;
     this.colorIdx = 0;
+    // 随机事件与世界状态
+    this.eventMs = opts.eventMs ?? 40_000; // 0 = 禁用随机事件（测试可关）
+    this.eventTimer = null;
+    this.eventQueue = [];
+    this.giant = null;      // {id, until}
+    this.lowGrav = null;    // {until}
+    this.copySeq = 0;
+    this._lastSlip = 0;
   }
 
   /* ---------------- 玩家管理 ---------------- */
@@ -39,7 +57,7 @@ export class Room {
       color: colors[this.players.length % colors.length],
       x: 0, y: 1, z: 0, yaw: 0,
       form: 'human', formUntil: 0,
-      hold: null, tagCd: 0, morphCd: 0, dc: false,
+      hold: null, tagCd: 0, scaleCd: 0, copyCd: 0, morphCd: 0, dc: false,
     };
     this.players.push(player);
     if (!this.hostId) this.hostId = id;
@@ -66,9 +84,18 @@ export class Room {
   toLobby(reason) {
     this.phase = 'lobby';
     this.puzzle = { chairGiven: false, corePowered: false, exitOpen: false, sideDoorOpen: false };
-    for (const p of this.players) { p.form = 'human'; p.hold = null; p.tagCd = 0; p.morphCd = 0; }
+    for (const p of this.players) {
+      p.form = 'human'; p.hold = null; p.tagCd = 0; p.scaleCd = 0; p.copyCd = 0; p.morphCd = 0;
+    }
+    this._clearWorldTimers();
     if (reason) this.feed(reason);
     this.lobby();
+  }
+
+  _clearWorldTimers() {
+    if (this.eventTimer) { clearTimeout(this.eventTimer); this.eventTimer = null; }
+    if (this.giant) { this.giant = null; }
+    if (this.lowGrav) { this.lowGrav = null; }
   }
 
   /* ---------------- 消息 ---------------- */
@@ -98,20 +125,22 @@ export class Room {
     if (live.length < 2) return '至少需要 2 名玩家';
 
     this.phase = 'playing';
+    this._clearWorldTimers();
     this.objects = clone(OBJECTS).map((o) => ({
-      ...o, p: [...o.p], q: [0, 0, 0, 1], by: null,
+      ...o, scale: 1, p: [...o.p], q: [0, 0, 0, 1], by: null,
     }));
     this.puzzle = { chairGiven: false, corePowered: false, exitOpen: false, sideDoorOpen: false };
     this.chaos = 0;
     this.chaosMode = false;
     this.startedAt = now();
-    this.stats = { tags: 0, morphs: 0, throws: 0, chaosPeak: 0, solves: 0 };
+    this.stats = { tags: 0, morphs: 0, throws: 0, chaosPeak: 0, solves: 0, copies: 0, scaled: 0, events: 0 };
 
     this.players.forEach((p, i) => {
       const s = SPAWNS[i % SPAWNS.length];
       [p.x, p.y, p.z] = s;
       p.yaw = Math.PI; // 面向北侧主厅
-      p.form = 'human'; p.formUntil = 0; p.hold = null; p.tagCd = 0; p.morphCd = 0;
+      p.form = 'human'; p.formUntil = 0; p.hold = null;
+      p.tagCd = 0; p.scaleCd = 0; p.copyCd = 0; p.morphCd = 0;
       p.dc = false;
     });
 
@@ -125,6 +154,7 @@ export class Room {
     }
     this.feed('实验开始：目标 —— 启动实验室出口');
     this.lobby();
+    this._scheduleEvent();
     return null;
   }
 
@@ -178,7 +208,7 @@ export class Room {
     if (p.hold) return '手上已有物体';
     if (p.form !== 'human') return '物化状态下无法抓取';
     const obj = this._nearObj(p, objId, ABILITIES.grabRange);
-    if (!obj) return '距离太远';
+    if (!obj) return '抓取失败：距离太远';
     if (obj.tags.includes('STATIC')) return '该物体被固定，先用标签枪改为 MOVABLE';
     p.hold = obj.id;
     obj.by = id;
@@ -259,6 +289,155 @@ export class Room {
     if (absurd) this.addChaos(CHAOS_EVENTS.absurdTag, '荒诞转换！');
     this.ev('tag', { id, obj: obj.id, form: obj.form, tags: obj.tags });
     return null;
+  }
+
+  /* ---------------- 缩放枪（设计书 §14.2） ---------------- */
+
+  handleScale(id, m) {
+    if (this.phase !== 'playing') return '对局未进行';
+    const p = this.find(id);
+    if (!p || p.dc) return '不可用';
+    if (p.scaleCd > now()) return `缩放枪冷却中 ${Math.ceil((p.scaleCd - now()) / 1000)}s`;
+    const obj = this.objects.find((o) => o.id === m.objId && !o.removed);
+    if (!obj) return '目标不存在';
+    if (dist3([p.x, p.y, p.z], obj.p) > ABILITIES.scaleGun.range) return '距离太远';
+    if (obj.by && obj.by !== id) return '该物体正被别人持有';
+    const dir = m.dir === -1 ? -1 : 1;
+    const cur = SCALE_LEVELS.indexOf(obj.scale ?? 1);
+    const next = Math.max(0, Math.min(SCALE_LEVELS.length - 1, (cur < 0 ? 1 : cur) + dir));
+    if (next === (cur < 0 ? 1 : cur)) return dir > 0 ? '已经最大了' : '已经最小了';
+    obj.scale = SCALE_LEVELS[next];
+    p.scaleCd = now() + ABILITIES.scaleGun.cooldownMs;
+    this.stats.scaled += 1;
+    this.ev('scale', { obj: obj.id, scale: obj.scale });
+    return null;
+  }
+
+  /* ---------------- 复制枪（设计书 §14.3） ---------------- */
+
+  handleCopy(id, m) {
+    if (this.phase !== 'playing') return '对局未进行';
+    const p = this.find(id);
+    if (!p || p.dc) return '不可用';
+    if (p.copyCd > now()) return `复制枪冷却中 ${Math.ceil((p.copyCd - now()) / 1000)}s`;
+    const obj = this.objects.find((o) => o.id === m.objId && !o.removed);
+    if (!obj) return '目标不存在';
+    if (obj.key) return '关键物体不可复制';
+    if (obj.kind) return '这种物体不可复制';
+    if (this.objects.filter((o) => !o.removed).length >= ABILITIES.maxObjects) return '场上物体太多';
+    if (dist3([p.x, p.y, p.z], obj.p) > ABILITIES.copyGun.range) return '距离太远';
+
+    const ang = Math.random() * Math.PI * 2;
+    const copy = {
+      id: `${obj.id}_c${++this.copySeq}`,
+      form: obj.form,
+      tags: [...obj.tags],
+      size: [...obj.size],
+      scale: obj.scale ?? 1,
+      p: [
+        Math.max(-9.4, Math.min(9.4, obj.p[0] + Math.cos(ang) * 1.0)),
+        obj.p[1] + 0.1,
+        Math.max(-7.4, Math.min(7.4, obj.p[2] + Math.sin(ang) * 1.0)),
+      ],
+      q: [0, 0, 0, 1],
+      by: null,
+      life: now() + ABILITIES.copyGun.lifetimeMs, // 限时存在
+    };
+    this.objects.push(copy);
+    p.copyCd = now() + ABILITIES.copyGun.cooldownMs;
+    this.stats.copies += 1;
+    this.ev('spawn', { obj: copy });
+    return null;
+  }
+
+  /* ---------------- 客户端上报的混乱事件（香蕉皮等） ---------------- */
+
+  handleChaosEvent(id, type) {
+    if (this.phase !== 'playing') return '对局未进行';
+    if (!this.find(id)) return '不可用';
+    if (type === 'banana') {
+      const t = now();
+      if (t - this._lastSlip < 1500) return null; // 全局限速防刷
+      this._lastSlip = t;
+      this.addChaos(CHAOS_EVENTS.bananaSlip, '有人踩了香蕉皮，滑飞了！');
+    }
+    return null;
+  }
+
+  /* ---------------- 随机事件调度（设计书 §25） ---------------- */
+
+  _scheduleEvent() {
+    if (this.eventMs <= 0) return; // 测试模式禁用
+    const first = this.eventTimer === null && this.stats && this.stats.events === 0;
+    const delay = first ? this.eventMs : 45_000 + Math.random() * 35_000;
+    this.eventTimer = setTimeout(() => {
+      this.eventTimer = null;
+      if (this.phase !== 'playing') return;
+      this._fireEvent();
+      this._scheduleEvent();
+    }, delay);
+  }
+
+  _fireEvent() {
+    if (!this.eventQueue.length) this.eventQueue = shuffle(Object.keys(RANDOM_EVENTS));
+    const type = this.eventQueue.pop();
+    const cfg = RANDOM_EVENTS[type];
+    this.stats.events += 1;
+    this.ev('event', { type });
+    this.feed(cfg.text);
+    if (cfg.chaos) this.addChaos(cfg.chaos, null);
+
+    if (type === 'chicken') {
+      const spawn = pick(SPAWNS);
+      for (let i = 0; i < cfg.count; i++) {
+        const obj = {
+          id: `chicken_${this.stats.events}_${i}`,
+          kind: 'chicken',
+          form: 'BOX',
+          tags: ['LIGHT', 'MOVABLE', 'PHYSICAL'],
+          size: [0.4, 0.45, 0.55],
+          scale: 1,
+          p: [spawn[0] + (Math.random() - 0.5) * 4, 0.6, spawn[2] + (Math.random() - 0.5) * 4],
+          q: [0, 0, 0, 1],
+          by: null,
+          life: now() + cfg.lifetimeMs,
+        };
+        this.objects.push(obj);
+        this.ev('spawn', { obj });
+      }
+    } else if (type === 'giant') {
+      const targets = this.players.filter((p) => !p.dc);
+      const target = pick(targets);
+      this.giant = { id: target.id, until: now() + cfg.durationMs };
+      this.ev('eventEnd', { type: 'giant', target: target.id, until: this.giant.until });
+    } else if (type === 'lowGravity') {
+      this.lowGrav = { until: now() + cfg.durationMs };
+      this.ev('eventEnd', { type: 'lowGravity', until: this.lowGrav.until });
+    } else if (type === 'banana') {
+      const p0 = pick(this.players.filter((p) => !p.dc));
+      for (let i = 0; i < cfg.count; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const r = 3 + Math.random() * 4;
+        this.objects.push({
+          id: `banana_${this.stats.events}_${i}`,
+          kind: 'banana',
+          form: 'BOX',
+          tags: ['STATIC', 'PHYSICAL'],
+          size: [0.55, 0.06, 0.55],
+          scale: 1,
+          p: [
+            Math.max(-9.4, Math.min(9.4, p0.x + Math.cos(ang) * r)),
+            0.04,
+            Math.max(-7.4, Math.min(7.4, p0.z + Math.sin(ang) * r)),
+          ],
+          q: [0, 0, 0, 1],
+          by: null,
+          life: now() + cfg.lifetimeMs,
+        });
+        this.ev('spawn', { obj: this.objects[this.objects.length - 1] });
+      }
+    }
+    // rampage：纯 ev，客户端 sim 者给自己模拟的物体加冲量
   }
 
   /* ---------------- 玩家物化 ---------------- */
@@ -378,6 +557,24 @@ export class Room {
       if (p.form !== 'human' && p.formUntil && t >= p.formUntil) this._restore(p);
     }
 
+    // 限时物体（复制体 / 鸡 / 香蕉）到期
+    for (const obj of this.objects) {
+      if (!obj.removed && obj.life && t >= obj.life) {
+        obj.removed = true;
+        this.ev('despawn', { obj: obj.id });
+      }
+    }
+
+    // 巨型玩家 / 低重力到期
+    if (this.giant && t >= this.giant.until) {
+      this.ev('eventEnd', { type: 'giant', target: this.giant.id, until: 0 });
+      this.giant = null;
+    }
+    if (this.lowGrav && t >= this.lowGrav.until) {
+      this.ev('eventEnd', { type: 'lowGravity', until: 0 });
+      this.lowGrav = null;
+    }
+
     // 物理模拟权：被持有时归持有者，否则归最近的在线玩家（客户端只模拟 sim===自己的物体）
     for (const obj of this.objects) {
       if (obj.removed) continue;
@@ -411,14 +608,21 @@ export class Room {
         id: p.id, name: p.name, color: p.color,
         x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: +p.yaw.toFixed(3),
         form: p.form, hold: p.hold, dc: p.dc,
+        giant: !!(this.giant && this.giant.id === p.id && t < this.giant.until),
       })),
       objs: this.objects.filter((o) => !o.removed).map((o) => ({
         id: o.id, p: o.p.map((v) => +v.toFixed(3)), q: o.q.map((v) => +v.toFixed(4)), sim: o.sim || null,
       })),
       chaos: this.chaos,
+      lowGrav: !!(this.lowGrav && t < this.lowGrav.until),
       cooldowns: Object.fromEntries(this.players.map((p) => [
         p.id,
-        { tag: Math.max(0, p.tagCd - t), morph: Math.max(0, p.morphCd - t) },
+        {
+          tag: Math.max(0, p.tagCd - t),
+          scale: Math.max(0, p.scaleCd - t),
+          copy: Math.max(0, p.copyCd - t),
+          morph: Math.max(0, p.morphCd - t),
+        },
       ])),
     });
   }
@@ -427,12 +631,14 @@ export class Room {
 
   win(p) {
     this.phase = 'done';
+    this._clearWorldTimers();
     const timeMs = now() - this.startedAt;
     const mm = String(Math.floor(timeMs / 60000)).padStart(2, '0');
     const ss = String(Math.floor((timeMs % 60000) / 1000)).padStart(2, '0');
     let title = '实验室模范生';
     if (this.stats.tags >= 4) title = '标签枪狂魔';
     else if (this.stats.morphs >= 2) title = '物体体验家';
+    else if (this.stats.copies >= 3) title = '无限复制批发商';
     else if (this.stats.chaosPeak >= 60) title = '头号破坏王';
     this.feed(`${p.name} 按下了出口开关！`);
     this.broadcast('roundEnd', {

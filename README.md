@@ -16,9 +16,12 @@
 ### 核心机制
 
 - **标签枪**：改写物体标签，真实影响世界。`BOX → CHAIR` 让实验员收下你手里的箱子；`HEAVY ↔ LIGHT` 改变投掷手感；`STATIC → MOVABLE` 让固定物重新可搬。把**能源球改成椅子**照样能插进核心 —— 荒诞操作是被允许的，还会加混乱值。
+- **缩放枪（Z/X）**：三档缩放（0.6x / 1x / 1.6x），物理质量随体积变化，保底贴地。
+- **复制枪（G）**：复制任意普通物体，复制体 30 秒后消失 —— 垫脚、压板、堆料随你批量生产。
 - **玩家物化（F）**：把自己变成箱子 15 秒，队友可以推着你去压压力板 —— 只有配合才能高效完成的行为。
 - **压力板**：踩住开启侧室门。单人可以拖箱子压板，双人可以一个踩板一个进去拿 —— 谜题没有唯一解。
-- **混乱值**：荒诞标签 +10、高速投掷 +3、物化 +3。冲到 90 进入 **CHAOS MODE**：全员弹飞、物体乱飞，一段时间后恢复 —— 混乱不是惩罚，是新的解法来源。
+- **随机事件**（每 45~80 秒一轮，设计书 §25）：🐔 鸡群乱跑撞人、🔬 随机玩家变巨型、🌙 低重力 15 秒、🍌 香蕉皮滑飞你、💥 物体集体暴走 —— 事件表循环洗牌，同一张图每局体验都不同。
+- **混乱值**：荒诞标签 +10、低重力 +10、物暴走 +10、鸡群 +5、高速投掷/物化/踩香蕉 +3。冲到 90 进入 **CHAOS MODE**：全员弹飞、物体乱飞，一段时间后恢复 —— 混乱不是惩罚，是新的解法来源。
 - **失败必须有趣**：本游戏没有 Game Over，实验报告只记录你有多离谱。
 
 ### 操作
@@ -30,6 +33,8 @@
 | 左键 | 投掷手中物体 |
 | 1-4 | 标签枪：`BOX` / `CHAIR` / `SPRING` / `LAMP` |
 | R / T | 翻转 `HEAVY↔LIGHT` / `MOVABLE↔STATIC` |
+| Z / X | 缩放枪：放大 / 缩小 |
+| G | 复制枪（30 秒限时复制体） |
 | F | 物化 / 解除（15 秒，有冷却） |
 | Enter | 聊天 |
 
@@ -45,6 +50,7 @@ npm start          # 默认 http://localhost:3000
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `PORT` | 3000 | HTTP + WebSocket 端口 |
+| `EVENT_MS` | 40000 | 随机事件首触发延迟（毫秒），`0` = 禁用事件 |
 
 ## 测试
 
@@ -52,10 +58,11 @@ npm start          # 默认 http://localhost:3000
 npm test
 ```
 
-三个套件自动运行（自动拉起临时服务器与无头浏览器）：
+四个套件自动运行（自动拉起两台临时服务器与无头浏览器）：
 
 - `check-dom.mjs` — DOM id / 资源引用 / 模块 import 静态校验
 - `test-server.mjs` — 2 个 ws 客户端全流程通关：标签枪冷却与距离校验、物化、压力板、双谜题、荒诞混乱值、结算、断线
+- `test-events.mjs` — 复制枪（关键物拒绝/冷却）、缩放枪（档位/冷却）、香蕉皮混乱上报、随机事件调度（`EVENT_MS=700` 短配置）
 - `e2e-browser.mjs` — 无头 Edge 加载真实页面，CDP 驱动完整客户端通关（25 项断言：场景生成、抓取、标签视觉重建、物化、交椅、插核、出口、报告）
 
 ## 架构
@@ -86,13 +93,14 @@ scripts/       测试套件
 
 | 方向 | 消息 |
 | --- | --- |
-| C→S | `create` `join` `start` `pose` `objpose` `grab` `release` `throw` `tag` `morph` `unmorph` `interact` `chat` `leave` |
-| S→C | `hello` `joined` `lobby` `roundStart` `snap` `ev`（tag/morph/hold/consumed/puzzle/chaos/chaosMode/feed） `chat` `roundEnd` `error` |
+| C→S | `create` `join` `start` `pose` `objpose` `grab` `release` `throw` `tag` `scale` `copy` `morph` `unmorph` `interact` `chaosEvent` `chat` `leave` |
+| S→C | `hello` `joined` `lobby` `roundStart` `snap` `ev`（tag/scale/spawn/despawn/morph/hold/consumed/puzzle/chaos/chaosMode/event/eventEnd/feed） `chat` `roundEnd` `error` |
 
 ## 开发阶段（按设计书）
 
 - **P0 Prototype ✅**：第三人称移动、抓取/投掷、物理物体、标签系统与标签枪、玩家物化、任务系统、混乱值、第一张地图、基础多人同步、完整谜题闭环
-- **P1**：缩放枪、复制枪、随机事件（鸡入侵/香蕉皮/低重力）、NPC 深度互动、音效、更多谜题
+- **P1 ✅（本轮）**：缩放枪、复制枪、随机事件五件套（鸡入侵/巨型玩家/低重力/香蕉皮/物体暴走）、事件专属测试
+- **P1 剩余**：音效、NPC 深度互动（会走会躲会参与机关）、更多谜题
 - **P2**：多地图、房间匹配、结算统计完善、场景精修（设计书 §37-62 的卡通品质标准）
 
 ## License

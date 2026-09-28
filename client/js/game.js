@@ -61,6 +61,37 @@ function buildObjectMesh(def, form) {
   const wood = new THREE.MeshStandardMaterial({ color: '#c98d4b', roughness: 0.85 });
   const metal = new THREE.MeshStandardMaterial({ color: '#8fa3b8', roughness: 0.4, metalness: 0.5 });
 
+  // 事件物体：鸡 / 香蕉皮
+  if (def.kind === 'chicken') {
+    const yellow = new THREE.MeshStandardMaterial({ color: '#ffe066', roughness: 0.7 });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 14, 12), yellow);
+    body.scale.set(1, 0.9, 1.25);
+    body.position.y = 0.2;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 10), yellow);
+    head.position.set(0, 0.4, 0.2);
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.1, 8),
+      new THREE.MeshStandardMaterial({ color: '#ff922b' }));
+    beak.rotation.x = Math.PI / 2;
+    beak.position.set(0, 0.4, 0.34);
+    const comb = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8),
+      new THREE.MeshStandardMaterial({ color: '#ff6b6b' }));
+    comb.position.set(0, 0.52, 0.18);
+    group.add(body, head, beak, comb);
+    group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    return group;
+  }
+  if (def.kind === 'banana') {
+    const peel = new THREE.Mesh(
+      new THREE.TorusGeometry(0.2, 0.05, 8, 14, Math.PI * 1.2),
+      new THREE.MeshStandardMaterial({ color: '#ffd43b', roughness: 0.55 })
+    );
+    peel.rotation.x = -Math.PI / 2;
+    peel.rotation.z = Math.random() * Math.PI;
+    peel.position.y = 0.03;
+    group.add(peel);
+    return group;
+  }
+
   if (form === 'CHAIR') {
     const seat = new THREE.Mesh(new THREE.BoxGeometry(sx, 0.1, sz), wood);
     seat.position.y = sy * 0.5;
@@ -565,16 +596,25 @@ export class Game {
       this.world.removeBody(d.body);
     }
     this.dynamics.clear();
-    for (const def of defs) {
-      const form = def.form;
-      const mesh = buildObjectMesh(def, form);
-      mesh.position.set(...def.p);
-      this.scene.add(mesh);
-      const body = this._makeBody(def, form, def.tags, def.p, def.q);
-      this.dynamics.set(def.id, {
-        def, form, tags: [...def.tags], mesh, body, sim: null, target: null, removed: false,
-      });
-    }
+    for (const def of defs) this.spawnObject(def);
+  }
+
+  // 单体生成（开局 / 复制体 / 鸡 / 香蕉通用）
+  spawnObject(def) {
+    if (this.dynamics.has(def.id)) return;
+    const scale = def.scale ?? 1;
+    const mesh = buildObjectMesh(def, def.form);
+    mesh.position.set(...def.p);
+    mesh.scale.setScalar(scale);
+    this.scene.add(mesh);
+    const body = this._makeBody(
+      { ...def, size: def.size.map((s) => s * scale) },
+      def.form, def.tags, def.p, def.q
+    );
+    this.dynamics.set(def.id, {
+      def, form: def.form, scale, tags: [...def.tags], mesh, body,
+      sim: null, target: null, removed: false,
+    });
   }
 
   _shapeFor(def) {
@@ -587,8 +627,9 @@ export class Game {
 
   _makeBody(def, form, tags, p, q) {
     const staticTag = tags.includes('STATIC');
+    const sc = def.scale ?? 1;
     const body = new CANNON.Body({
-      mass: staticTag ? 0 : FORM_MASS(tags),
+      mass: staticTag ? 0 : FORM_MASS(tags) * sc * sc * sc,
       shape: this._shapeFor({ ...def, form }),
       position: new CANNON.Vec3(p[0], p[1], p[2]),
       linearDamping: 0.25,
@@ -600,30 +641,49 @@ export class Game {
     return body;
   }
 
-  applyTag(id, form, tags) {
-    const d = this.dynamics.get(id);
-    if (!d || d.removed) return;
+  // 标签 / 缩放变化后的物理体重建（视觉 mesh 另行更新）
+  _rebuild(d) {
     const pos = d.body.position;
     const quat = d.body.quaternion;
     this.world.removeBody(d.body);
-    this.scene.remove(d.mesh);
+    const sc = d.scale ?? 1;
+    d.body = this._makeBody(
+      { ...d.def, size: d.def.size.map((s) => s * sc), form: d.form, scale: sc },
+      d.form, d.tags,
+      [pos.x, pos.y, pos.z],
+      [quat.x, quat.y, quat.z, quat.w]
+    );
+    if (d.sim !== this.myId) d.body.type = CANNON.Body.KINEMATIC;
+    else d.body.allowSleep = !d.heldBy;
+    d.body.velocity.set(0, 0, 0);
+    return d.body;
+  }
+
+  applyTag(id, form, tags) {
+    const d = this.dynamics.get(id);
+    if (!d || d.removed) return;
     d.form = form;
     d.tags = [...tags];
     d.def = { ...d.def, form };
-    d.mesh = buildObjectMesh({ ...d.def, size: this._sizeFor(id) }, form);
-    d.mesh.position.set(pos.x, pos.y, pos.z);
+    this.scene.remove(d.mesh);
+    d.mesh = buildObjectMesh(d.def, form);
+    d.mesh.position.copy(d.body.position);
+    d.mesh.quaternion.copy(d.body.quaternion);
+    d.mesh.scale.setScalar(d.scale ?? 1);
     this.scene.add(d.mesh);
-    d.body = this._makeBody({ ...d.def, size: this._sizeFor(id) }, form, tags,
-      [pos.x, pos.y, pos.z], [quat.x, quat.y, quat.z, quat.w]);
-    // 按当前模拟权重恢复 body 类型（重建的 body 默认 DYNAMIC）
-    if (d.sim !== this.myId) d.body.type = CANNON.Body.KINEMATIC;
-    else d.body.allowSleep = !d.heldBy;
-    return d;
+    this._rebuild(d);
   }
 
-  _sizeFor(id) {
+  applyScale(id, scale) {
     const d = this.dynamics.get(id);
-    return d?.def.size || [0.8, 0.8, 0.8];
+    if (!d || d.removed) return;
+    const old = d.scale ?? 1;
+    // 保持底面贴地
+    const bottom = d.body.position.y - (d.def.size[1] * old) / 2;
+    d.scale = scale;
+    d.mesh.scale.setScalar(scale);
+    this._rebuild(d);
+    d.body.position.y = bottom + (d.def.size[1] * scale) / 2;
   }
 
   removeObject(id) {
@@ -720,6 +780,7 @@ export class Game {
       r.targetPos = new THREE.Vector3(p.x, p.y, p.z);
       r.targetYaw = p.yaw;
       r.dc = p.dc;
+      r.group.scale.setScalar(p.giant ? 2 : 1); // 巨型玩家事件（设计书 §25）
       if (r.visual) {
         r.visual.traverse((o) => {
           if (!o.material) return;
@@ -747,6 +808,15 @@ export class Game {
       }
     }
     this.onBlast?.();
+  }
+
+  // 物体暴走事件：由模拟者给自己的动态物体施加随机冲量
+  rampage() {
+    for (const d of this.dynamics.values()) {
+      if (d.removed || d.sim !== this.myId || d.body.type !== CANNON.Body.DYNAMIC) continue;
+      d.body.velocity.set((Math.random() - 0.5) * 9, 1 + Math.random() * 4, (Math.random() - 0.5) * 9);
+      d.body.angularVelocity.set(Math.random() * 7, Math.random() * 7, Math.random() * 7);
+    }
   }
 
   /* ---------------- 每帧 ---------------- */
@@ -808,6 +878,25 @@ export class Game {
       r.group.rotation.y = r.yaw;
       r.body.position.set(r.pos.x, r.pos.y + 0.42, r.pos.z);
       r.body.aabbNeedsUpdate = true;
+    }
+
+    // 鸡的自主跑动（由模拟者执行，撞到谁全靠物理）
+    for (const d of this.dynamics.values()) {
+      if (d.removed || d.def.kind !== 'chicken' || d.sim !== this.myId || d.heldBy) continue;
+      const t = performance.now();
+      if (!d.aiDir || t - (d.aiT || 0) > 900 + ((d.body.id * 137) % 800)) {
+        d.aiT = t;
+        const a = Math.random() * Math.PI * 2;
+        const dx = Math.cos(a);
+        const dz = Math.sin(a);
+        // 贴墙时强制朝场内，避免顶着墙跑
+        d.aiDir = [
+          Math.abs(d.body.position.x) > 8.4 ? -Math.sign(d.body.position.x) * 0.8 : dx,
+          Math.abs(d.body.position.z) > 6.4 ? -Math.sign(d.body.position.z) * 0.8 : dz,
+        ];
+      }
+      d.body.velocity.x = d.aiDir[0] * 4.6;
+      d.body.velocity.z = d.aiDir[1] * 4.6;
     }
 
     // 弹簧跳跃（本地玩家）

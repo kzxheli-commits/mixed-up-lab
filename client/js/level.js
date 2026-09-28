@@ -44,8 +44,23 @@ export const TAG_RULES = {
 // 能力参数（设计书 §15）
 export const ABILITIES = {
   tagGun: { cooldownMs: 10_000, range: 6 },
+  scaleGun: { cooldownMs: 6_000, range: 6 },
+  copyGun: { cooldownMs: 20_000, range: 6, lifetimeMs: 30_000 },
   morph: { cooldownMs: 15_000, durationMs: 15_000, range: 999 },
   grabRange: 2.6,
+  maxObjects: 14, // 场上动态物体上限（复制/事件共用）
+};
+
+// 缩放枪档位（设计书 §14.2）
+export const SCALE_LEVELS = [0.6, 1.0, 1.6];
+
+// 随机事件表（设计书 §25）：服务器权威调度，客户端表现
+export const RANDOM_EVENTS = {
+  chicken: { count: 3, lifetimeMs: 60_000, chaos: 5, text: '🐔 鸡群入侵了实验室！' },
+  giant: { durationMs: 10_000, chaos: 0, text: '🔬 有玩家变成了巨型玩家！' },
+  lowGravity: { durationMs: 15_000, chaos: 10, text: '🌙 低重力！大家飘起来了！' },
+  banana: { count: 2, lifetimeMs: 45_000, chaos: 0, text: '🍌 地上出现了香蕉皮……' },
+  rampage: { chaos: 10, text: '💥 物体开始自己暴走！' },
 };
 
 // 混乱事件表（设计书 §17）
@@ -53,6 +68,7 @@ export const CHAOS_EVENTS = {
   absurdTag: 10,    // 把能源球改成椅子等荒诞转换
   morphSelf: 3,     // 玩家物化
   hardThrow: 3,     // 高速投掷
+  bananaSlip: 3,    // 踩香蕉皮
 };
 
 export const GOAL_TEXT = '启动实验室出口';

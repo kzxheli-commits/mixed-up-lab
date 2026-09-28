@@ -118,9 +118,10 @@ export class UI {
       </div>`;
     $('abilities').innerHTML =
       cell('1-4/R/T', '标签枪', a.tagRemain)
+      + cell('Z/X', '缩放枪', a.scaleRemain)
+      + cell('G', '复制枪', a.copyRemain)
       + cell('F', a.morphing ? '物化中' : '物化', a.morphRemain, a.morphing ? `${(a.morphRemain / 1000).toFixed(0)}s 后恢复` : '就绪')
-      + cell('E', '抓取/交互', 0, '就绪')
-      + cell('左键', '投掷', 0, '就绪');
+      + cell('E/左键', '交互/投掷', 0, '就绪');
   }
 
   setRoomInfo(code, players, myId) {

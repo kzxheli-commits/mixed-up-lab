@@ -32,9 +32,10 @@ let roomCode = '';
 let roomPlayers = [];
 let puzzle = { chairGiven: false, corePowered: false, exitOpen: false, sideDoorOpen: false };
 let orbTaken = false;
-let myCooldowns = { tag: 0, morph: 0 };
+let myCooldowns = { tag: 0, scale: 0, copy: 0, morph: 0 };
 let chaos = 0;
 let chaosMode = false;
+let lowGravOn = false;
 
 /* ---------------- 聊天 / 输入 ---------------- */
 
@@ -54,6 +55,11 @@ player.onToggleMorph = () => {
 
 game.onBlast = () => player.blast();
 game.onSpring = () => { /* 弹跳反馈由物理表现 */ };
+player.onSlip = () => {
+  net.send({ t: 'chaosEvent', type: 'banana' });
+  ui.toast('滑——！');
+};
+player.onPeck = () => ui.toast('被鸡撞了！');
 
 /* ---------------- 网络消息 ---------------- */
 
@@ -83,6 +89,8 @@ net.on('roundStart', (m) => {
   orbTaken = false;
   chaos = m.chaos || 0;
   chaosMode = false;
+  lowGravOn = false;
+  game.world.gravity.set(0, -22, 0);
   game.spawnObjects(m.objects);
   game.setPuzzle(puzzle);
   player.spawnAt(m.you.spawn, roomPlayers.find((p) => p.id === net.myId)?.color || '#ff6b6b');
@@ -102,12 +110,26 @@ net.on('snap', (m) => {
   for (const it of m.objs) game.setSim(it.id, it.sim);
   chaos = m.chaos ?? chaos;
   ui.setChaos(chaos, chaosMode);
-  const mine = m.cooldowns?.[net.myId];
-  if (mine) myCooldowns = mine;
+
+  // 低重力事件：以服务器快照为准
+  if (!!m.lowGrav !== lowGravOn) {
+    lowGravOn = !!m.lowGrav;
+    game.world.gravity.set(0, lowGravOn ? -6 : -22, 0);
+    ui.feed(lowGravOn ? '🌙 低重力生效——跳得好高！' : '重力恢复正常');
+  }
+
+  // 巨型玩家（含本地）
+  const mine = m.players.find((p) => p.id === net.myId);
+  if (mine) player.setGiant(mine.giant);
+
+  const cd = m.cooldowns?.[net.myId];
+  if (cd) myCooldowns = cd;
   // 物化中：剩余冷却 = 总剩余 - 物化时长（服务器在物化开始时就把结束时间+冷却写入）
   const morphing = player.form === 'box';
   ui.setAbilities({
     tagRemain: myCooldowns.tag,
+    scaleRemain: myCooldowns.scale,
+    copyRemain: myCooldowns.copy,
     morphRemain: morphing ? Math.max(myCooldowns.morph - 15000, 0) : myCooldowns.morph,
     morphing,
   });
@@ -127,6 +149,25 @@ net.on('ev', (m) => {
       if (interact.held === m.obj) interact.held = null;
       game.removeObject(m.obj);
       ui.feed(`已交付：${m.obj === 'chair0' ? '椅子' : '能源球'}`);
+      break;
+    case 'scale':
+      game.applyScale(m.obj, m.scale);
+      break;
+    case 'spawn':
+      game.spawnObject(m.obj);
+      break;
+    case 'despawn':
+      if (interact.held === m.obj) interact.held = null;
+      game.removeObject(m.obj);
+      break;
+    case 'event':
+      if (m.type === 'rampage') {
+        game.rampage();
+        ui.feed('💥 物体暴走！（由最近的玩家物理模拟）');
+      }
+      break;
+    case 'eventEnd':
+      // giant/到期由 snap 权威驱动；lowGravity 结束同理
       break;
     case 'morph': {
       const me = m.id === net.myId;

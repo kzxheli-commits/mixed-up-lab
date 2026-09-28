@@ -5,7 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const port = 3300 + Math.floor(Math.random() * 400);
+const port = 3300 + Math.floor(Math.random() * 300);
+const port2 = port + 1;
 
 function startServer(env) {
   const child = spawn(process.execPath, ['server/index.js'], {
@@ -37,10 +38,13 @@ let failures = 0;
 try {
   console.log('--- 启动测试服务器 ---');
   servers.push(await startServer({ PORT: String(port) }));
+  // 事件服务器：缩短随机事件首触发延迟
+  servers.push(await startServer({ PORT: String(port2), EVENT_MS: '700' }));
 
   const suites = [
     ['DOM 静态校验', ['scripts/check-dom.mjs']],
     ['服务端全流程（通关）', ['scripts/test-server.mjs', `ws://127.0.0.1:${port}/ws`]],
+    ['事件与新能力（复制/缩放/随机事件）', ['scripts/test-events.mjs', `ws://127.0.0.1:${port2}/ws`]],
     ['浏览器端 e2e（真实页面通关）', ['scripts/e2e-browser.mjs', `http://127.0.0.1:${port}`]],
   ];
   for (const [name, args] of suites) {
