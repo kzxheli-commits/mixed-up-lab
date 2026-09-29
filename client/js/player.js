@@ -7,9 +7,10 @@ import { sfx } from './audio.js';
 
 const HUMAN_R = 0.42;
 const BOX_HALF = 0.4;
-const WALK = 5.2;
-const BOX_WALK = 2.4;
-const JUMP = 7.8;
+const WALK = 4.2;   // 5.2 太快：房间仅 20m，横穿 4 秒难以精细操作
+const BOX_WALK = 2.2;
+const JUMP = 7.6;
+const PLAYER_GROUP = 2; // 玩家自身碰撞层：相机/地面射线要忽略它
 
 export class Player {
   constructor(game) {
@@ -44,6 +45,7 @@ export class Player {
       linearDamping: 0.12,
       angularDamping: 1,
       position: new CANNON.Vec3(...ROOM_SPAWN_DEFAULT),
+      collisionFilterGroup: PLAYER_GROUP,
     });
     body.fixedRotation = true;
     body.updateMassProperties();
@@ -104,8 +106,8 @@ export class Player {
         this.yaw -= e.movementX * 0.0026;
         this.pitch -= e.movementY * 0.0026;
       } else if (this._drag && this.enabled && !this.chatOpen) {
-        this.yaw -= (e.clientX - this._drag.x) * 0.006;
-        this.pitch -= (e.clientY - this._drag.y) * 0.006;
+        this.yaw -= (e.clientX - this._drag.x) * 0.0045;
+        this.pitch -= (e.clientY - this._drag.y) * 0.0045;
         this._drag = { x: e.clientX, y: e.clientY };
       } else {
         return;
@@ -151,7 +153,7 @@ export class Player {
       vx = (fwdX * -mz + rightX * mx) * speed;
       vz = (fwdZ * -mz + rightZ * mx) * speed;
     }
-    const accel = grounded ? 14 : 5;
+    const accel = grounded ? 18 : 8; // 更跟手：旧值 14/5 有明显滑步感
     body.velocity.x += (vx - body.velocity.x) * Math.min(1, accel * dt);
     body.velocity.z += (vz - body.velocity.z) * Math.min(1, accel * dt);
 
@@ -183,16 +185,36 @@ export class Player {
     this._chaosContacts(dt, footY);
 
     const headY = footY + 1.55;
-    const back = 3.4, shoulder = 0.55;
+    const back = 3.0, shoulder = 0.5;
     const cosP = Math.cos(this.pitch), sinP = Math.sin(this.pitch);
     const dirX = -Math.sin(this.yaw) * cosP;
     const dirZ = -Math.cos(this.yaw) * cosP;
-    const camX = p.x - dirX * back + Math.cos(this.yaw) * shoulder;
-    const camZ = p.z - dirZ * back - Math.sin(this.yaw) * shoulder;
+    let camX = p.x - dirX * back + Math.cos(this.yaw) * shoulder;
+    let camZ = p.z - dirZ * back - Math.sin(this.yaw) * shoulder;
     let camY = headY - sinP * back + 0.3;
     camY = Math.max(0.4, Math.min(ROOM.height - 0.3, camY));
+
+    // 相机避障：头部→相机连线被墙/家具挡住则拉近（旧版会穿进几何体里）
+    const frac = this._cameraFraction(p.x, headY, p.z, camX, camY, camZ);
+    if (frac < 1) {
+      camX = p.x + (camX - p.x) * Math.max(frac, 0.15);
+      camY = headY + (camY - headY) * Math.max(frac, 0.15);
+      camZ = p.z + (camZ - p.z) * Math.max(frac, 0.15);
+    }
+
     this.camera.position.set(camX, camY, camZ);
     this.camera.lookAt(p.x + dirX * 2, headY + sinP * 2, p.z + dirZ * 2);
+  }
+
+  // 返回 0~1：视线到相机路径上的首个遮挡比例（1 = 无遮挡）
+  _cameraFraction(px, py, pz, cx, cy, cz) {
+    this._rayResult.reset();
+    this._ray.from.set(px, py, pz);
+    this._ray.to.set(cx, cy, cz);
+    this._ray.skipBackfaces = true;
+    this._ray.collisionFilterMask = ~PLAYER_GROUP; // 忽略玩家自身
+    this._ray.intersectWorld(this.game.world, { result: this._rayResult, mode: CANNON.Ray.CLOSEST });
+    return this._rayResult.hasHit ? this._rayResult.hitFraction : 1;
   }
 
   _grounded() {
@@ -204,6 +226,7 @@ export class Player {
     this._ray.from = from;
     this._ray.to = to;
     this._ray.skipBackfaces = true;
+    this._ray.collisionFilterMask = ~PLAYER_GROUP; // 别打到自己
     this._ray.intersectWorld(this.game.world, { result: this._rayResult, mode: CANNON.Ray.CLOSEST });
     // cannon-es 的法线字段是 hitNormalWorld（曾误写 normal 导致落地瞬间 rAF 崩溃）
     return this._rayResult.hasHit && this._rayResult.hitNormalWorld.y > 0.35;
@@ -283,6 +306,7 @@ export class Player {
         shape: new CANNON.Box(new CANNON.Vec3(BOX_HALF, BOX_HALF, BOX_HALF)),
         position: new CANNON.Vec3(pos.x, foot + BOX_HALF, pos.z),
         linearDamping: 0.2, angularDamping: 1,
+        collisionFilterGroup: PLAYER_GROUP,
       });
       this.footOffset = BOX_HALF;
     } else {
@@ -291,6 +315,7 @@ export class Player {
         shape: new CANNON.Sphere(HUMAN_R),
         position: new CANNON.Vec3(pos.x, foot + HUMAN_R, pos.z),
         linearDamping: 0.12, angularDamping: 1,
+        collisionFilterGroup: PLAYER_GROUP,
       });
       this.footOffset = HUMAN_R;
     }
