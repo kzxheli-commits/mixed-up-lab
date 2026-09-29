@@ -14,6 +14,16 @@
 }
 
 html, body { width: 100%; height: 100%; overflow: hidden; }
+
+/* 轻微暗角：给画面加一层"镜头感"（位于 canvas 之上、HUD 之下） */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  background: radial-gradient(ellipse at center, transparent 58%, rgba(4, 8, 16, 0.38) 100%);
+}
 body {
   font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
   background: #0d1420;

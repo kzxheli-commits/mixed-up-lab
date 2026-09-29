@@ -1,7 +1,7 @@
 // 本地玩家：物理体、WASD 控制、第三人称相机、物化
 import * as THREE from '../vendor/three.module.min.js';
 import * as CANNON from '../vendor/cannon-es.js';
-import { buildPlayerMesh } from './game.js';
+import { buildPlayerMesh, animateAvatar } from './game.js';
 import { ROOM } from './level.js';
 import { sfx } from './audio.js';
 
@@ -176,6 +176,9 @@ export class Player {
     const footY = p.y - this.footOffset;
     this.visual.position.set(p.x, footY, p.z);
     this.visual.rotation.y = this.yaw + Math.PI; // 面向相机前方
+    if (this.form === 'human') {
+      animateAvatar(this.visual, Math.hypot(body.velocity.x, body.velocity.z), performance.now() / 1000);
+    }
 
     this._chaosContacts(dt, footY);
 

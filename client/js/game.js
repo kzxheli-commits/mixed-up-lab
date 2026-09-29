@@ -53,13 +53,90 @@ function wallTexture() {
   return tex;
 }
 
+// 程序纹理缓存（木箱、金属件共用）
+let _woodTex = null;
+function woodTexture() {
+  if (_woodTex) return _woodTex;
+  _woodTex = canvasTexture(128, 128, (g) => {
+    g.fillStyle = '#c98d4b'; g.fillRect(0, 0, 128, 128);
+    for (let y = 0; y < 128; y += 16) {
+      g.fillStyle = `rgba(122,74,34,${0.14 + Math.random() * 0.1})`;
+      g.fillRect(0, y, 128, 3);
+      g.fillStyle = 'rgba(255,220,170,0.12)';
+      g.fillRect(0, y + 4, 128, 2);
+    }
+    for (let i = 0; i < 60; i++) {
+      g.fillStyle = `rgba(90,55,20,${Math.random() * 0.18})`;
+      g.fillRect(Math.random() * 128, Math.random() * 128, 2 + Math.random() * 8, 1.5);
+    }
+    // 节疤
+    g.strokeStyle = 'rgba(90,55,20,0.35)'; g.lineWidth = 2;
+    g.beginPath(); g.ellipse(84, 52, 9, 5, 0.4, 0, 7); g.stroke();
+  });
+  _woodTex.wrapS = _woodTex.wrapT = THREE.RepeatWrapping;
+  return _woodTex;
+}
+
+let _metalNoise = null;
+function metalRoughness() {
+  if (_metalNoise) return _metalNoise;
+  _metalNoise = canvasTexture(128, 128, (g) => {
+    g.fillStyle = '#9a9a9a'; g.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 220; i++) {
+      const v = 110 + Math.random() * 100;
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.fillRect(Math.random() * 128, Math.random() * 128, 1 + Math.random() * 3, 1);
+    }
+    for (let i = 0; i < 8; i++) {
+      g.strokeStyle = `rgba(255,255,255,${0.1 + Math.random() * 0.15})`;
+      g.beginPath();
+      const x = Math.random() * 128, y = Math.random() * 128;
+      g.moveTo(x, y); g.lineTo(x + (Math.random() - 0.5) * 60, y + (Math.random() - 0.5) * 14);
+      g.stroke();
+    }
+  });
+  _metalNoise.wrapS = _metalNoise.wrapT = THREE.RepeatWrapping;
+  return _metalNoise;
+}
+
+// 窗外远景：渐变天空 + 建筑剪影（设计书 §57 远景让地图显得更大）
+let _viewTex = null;
+function windowView() {
+  if (_viewTex) return _viewTex;
+  _viewTex = canvasTexture(512, 256, (g) => {
+    const sky = g.createLinearGradient(0, 0, 0, 256);
+    sky.addColorStop(0, '#7ec8ff');
+    sky.addColorStop(0.55, '#cfe9ff');
+    sky.addColorStop(1, '#eaf6ff');
+    g.fillStyle = sky; g.fillRect(0, 0, 512, 256);
+    // 远处建筑剪影
+    const buildings = [[0, 140, 70, 116], [64, 100, 54, 156], [110, 160, 90, 96], [196, 120, 64, 136], [252, 84, 78, 172], [324, 150, 60, 106], [378, 112, 72, 144], [444, 166, 68, 90]];
+    for (const [x, y, w, h] of buildings) {
+      g.fillStyle = 'rgba(70,96,130,0.85)';
+      g.fillRect(x, y, w, h);
+      g.fillStyle = 'rgba(255,244,190,0.75)';
+      for (let wx = x + 8; wx < x + w - 6; wx += 16) {
+        for (let wy = y + 10; wy < y + h - 8; wy += 22) {
+          if (Math.random() > 0.4) g.fillRect(wx, wy, 6, 8);
+        }
+      }
+    }
+    g.fillStyle = 'rgba(255,255,255,0.55)';
+    g.beginPath(); g.ellipse(420, 46, 60, 22, 0, 0, 7); g.fill();
+    g.beginPath(); g.ellipse(120, 60, 44, 16, 0, 0, 7); g.fill();
+  });
+  return _viewTex;
+}
+
 /* ---------------- 动态物体外观（随标签变化） ---------------- */
 
 function buildObjectMesh(def, form) {
   const [sx, sy, sz] = def.size;
   const group = new THREE.Group();
-  const wood = new THREE.MeshStandardMaterial({ color: '#c98d4b', roughness: 0.85 });
-  const metal = new THREE.MeshStandardMaterial({ color: '#8fa3b8', roughness: 0.4, metalness: 0.5 });
+  const wood = new THREE.MeshStandardMaterial({ map: woodTexture(), roughness: 0.78 });
+  const metal = new THREE.MeshStandardMaterial({
+    color: '#9fb2c9', roughness: 0.42, metalness: 0.6, roughnessMap: metalRoughness(),
+  });
 
   // 事件物体：鸡 / 香蕉皮
   if (def.kind === 'chicken') {
@@ -159,45 +236,110 @@ function buildObjectMesh(def, form) {
   return group;
 }
 
-/* ---------------- 远端玩家外观 ---------------- */
+/* ---------------- 远端/本地玩家外观（设计书 §13：大头、四肢、高辨识度） ---------------- */
 
 export function buildPlayerMesh(color, form) {
   const g = new THREE.Group();
   if (form === 'box') {
     const m = new THREE.Mesh(
       new THREE.BoxGeometry(0.8, 0.8, 0.8),
-      new THREE.MeshStandardMaterial({ color: '#c98d4b', roughness: 0.85 })
+      new THREE.MeshStandardMaterial({ map: woodTexture(), roughness: 0.8 })
     );
     m.position.y = 0.4;
     const mark = new THREE.Mesh(
-      new THREE.BoxGeometry(0.82, 0.2, 0.82),
+      new THREE.BoxGeometry(0.84, 0.2, 0.84),
       new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35 })
     );
     mark.position.y = 0.68;
     g.add(m, mark);
-  } else {
-    const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.55 });
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 0.7, 6, 14), bodyMat);
-    body.position.y = 0.67;
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.33, 18, 14),
-      new THREE.MeshStandardMaterial({ color: '#ffe8d6', roughness: 0.7 })
-    );
-    head.position.y = 1.52;
-    const visor = new THREE.Mesh(
-      new THREE.BoxGeometry(0.4, 0.14, 0.1),
-      new THREE.MeshStandardMaterial({ color: '#22303f', roughness: 0.2, metalness: 0.4 })
-    );
-    visor.position.set(0, 1.55, 0.29);
-    const antenna = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.02, 0.02, 0.3, 6),
-      new THREE.MeshStandardMaterial({ color: '#ffd43b' })
-    );
-    antenna.position.y = 1.9;
-    g.add(body, head, visor, antenna);
+    return g;
   }
+
+  const suit = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
+  const skin = new THREE.MeshStandardMaterial({ color: '#ffe8d6', roughness: 0.7 });
+  const pants = new THREE.MeshStandardMaterial({ color: '#33415c', roughness: 0.75 });
+
+  // 腿（髋部为轴，走路摆动）
+  const legGeo = new THREE.CylinderGeometry(0.085, 0.07, 0.5, 10);
+  const legs = [];
+  for (const dx of [-0.13, 0.13]) {
+    const hip = new THREE.Group();
+    hip.position.set(dx, 0.52, 0);
+    const leg = new THREE.Mesh(legGeo, pants);
+    leg.position.y = -0.25;
+    hip.add(leg);
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.22), pants);
+    shoe.position.set(0, -0.52, 0.04);
+    hip.add(shoe);
+    g.add(hip);
+    legs.push(hip);
+  }
+
+  // 身体（短胶囊，给腿留空间）
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 0.34, 6, 14), suit);
+  body.position.y = 0.86;
+  g.add(body);
+  // 工具腰带（辨识装饰）
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.09, 0.34),
+    new THREE.MeshStandardMaterial({ color: '#ffd43b', roughness: 0.55 }));
+  belt.position.y = 0.7;
+  g.add(belt);
+
+  // 手臂（肩部为轴）
+  const armGeo = new THREE.CylinderGeometry(0.065, 0.06, 0.42, 10);
+  const arms = [];
+  for (const dx of [-0.3, 0.3]) {
+    const shoulder = new THREE.Group();
+    shoulder.position.set(dx, 1.04, 0);
+    const arm = new THREE.Mesh(armGeo, suit);
+    arm.position.y = -0.2;
+    shoulder.add(arm);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), skin);
+    hand.position.y = -0.44;
+    shoulder.add(hand);
+    g.add(shoulder);
+    arms.push(shoulder);
+  }
+
+  // 大头 + 眼睛 + 天线
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 18, 14), skin);
+  head.position.y = 1.5;
+  g.add(head);
+  const eyeW = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.3 });
+  const eyeB = new THREE.MeshBasicMaterial({ color: '#1c2733' });
+  for (const dx of [-0.12, 0.12]) {
+    const w = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), eyeW);
+    w.position.set(dx, 1.54, 0.27);
+    w.scale.set(1, 1.15, 0.6);
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), eyeB);
+    b.position.set(dx, 1.54, 0.325);
+    g.add(w, b);
+  }
+  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.24, 6),
+    new THREE.MeshStandardMaterial({ color: '#ffd43b', roughness: 0.5 }));
+  antenna.position.y = 1.86;
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6),
+    new THREE.MeshBasicMaterial({ color }));
+  tip.position.y = 1.99;
+  g.add(antenna, tip);
+
+  g.userData.armL = arms[0];
+  g.userData.armR = arms[1];
+  g.userData.legL = legs[0];
+  g.userData.legR = legs[1];
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return g;
+}
+
+// 行走摆动动画（速度驱动）
+export function animateAvatar(group, speed, t) {
+  const ud = group.userData;
+  if (!ud.armL) return;
+  const swing = Math.sin(t * 9) * Math.min(Math.max(speed, 0), 6) * 0.11;
+  ud.armL.rotation.x = swing;
+  ud.armR.rotation.x = -swing;
+  ud.legL.rotation.x = -swing;
+  ud.legR.rotation.x = swing;
 }
 
 // NPC 头顶气泡（台词随服务器快照更新）
@@ -253,6 +395,9 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // 电影级色调映射：去掉"灰塑料感"（设计书 §38 色彩明快、光照柔和）
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.25;
 
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -22, 0) });
     this.world.broadphase = new CANNON.SAPBroadphase(this.world);
@@ -284,31 +429,57 @@ export class Game {
     this.camera && this.camera.updateProjectionMatrix();
   }
 
-  /* ---------------- 灯光 ---------------- */
+  /* ---------------- 灯光（设计书 §52：明亮、柔和、彩色） ---------------- */
 
   _buildLights() {
-    this.scene.add(new THREE.HemisphereLight('#cfe8ff', '#2a3a4d', 0.85));
-    const sun = new THREE.DirectionalLight('#fff6dd', 1.35);
-    sun.position.set(8, 14, 6);
+    // 天光 + 地面反弹：整体提亮，消灭天花板死黑
+    this.scene.add(new THREE.HemisphereLight('#e8f4ff', '#5e6f85', 1.15));
+
+    // 主方向光（阴影）
+    const sun = new THREE.DirectionalLight('#fff6dd', 1.7);
+    sun.position.set(9, 15, 7);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.left = -16;
     sun.shadow.camera.right = 16;
     sun.shadow.camera.top = 14;
     sun.shadow.camera.bottom = -14;
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.02;
+    sun.shadow.radius = 4;
     this.scene.add(sun);
 
-    for (const x of [-6, 0, 6]) {
-      const lamp = new THREE.PointLight('#eaf6ff', 0.5, 18);
-      lamp.position.set(x, 4.6, 0);
-      this.scene.add(lamp);
-      const bulb = new THREE.Mesh(
-        new THREE.BoxGeometry(2.2, 0.12, 0.8),
-        new THREE.MeshBasicMaterial({ color: '#f8fbff' })
-      );
-      bulb.position.set(x, 4.92, 0);
-      this.scene.add(bulb);
+    // 北窗进光（冷色补光，给窗户一侧体积感）
+    const windowLight = new THREE.DirectionalLight('#bcd8ff', 0.55);
+    windowLight.position.set(-2, 7, -16);
+    windowLight.target.position.set(0, 1, 2);
+    this.scene.add(windowLight, windowLight.target);
+
+    // 吸顶灯阵：物理光照单位下需要高 candela 值（旧值 0.5 太暗是画面发黑的主因）
+    for (const x of [-8, -4, 0, 4, 8]) {
+      for (const z of [-3.5, 3.5]) {
+        const lamp = new THREE.PointLight('#eaf6ff', 9, 13, 2);
+        lamp.position.set(x, 4.55, z);
+        this.scene.add(lamp);
+        const bulb = new THREE.Mesh(
+          new THREE.BoxGeometry(1.6, 0.1, 0.6),
+          new THREE.MeshBasicMaterial({ color: '#ffffff' })
+        );
+        bulb.position.set(x, 4.9, z);
+        this.scene.add(bulb);
+        const hood = new THREE.Mesh(
+          new THREE.BoxGeometry(1.75, 0.14, 0.75),
+          new THREE.MeshStandardMaterial({ color: '#4a5a70', roughness: 0.5, metalness: 0.4 })
+        );
+        hood.position.set(x, 4.98, z);
+        this.scene.add(hood);
+      }
     }
+
+    // 核心暖光：随启动变亮（setPuzzle 调节强度）
+    this.coreLight = new THREE.PointLight('#ff922b', 4, 10, 2);
+    this.coreLight.position.set(-6.5, 2.2, -5.5);
+    this.scene.add(this.coreLight);
   }
 
   /* ---------------- 关卡静态几何 ---------------- */
@@ -370,10 +541,10 @@ export class Game {
     // 门上过梁
     this._addStaticBox([t, H - 3.2, EXIT.z1 - EXIT.z0], [ROOM.maxX + t / 2, 3.2 + (H - 3.2) / 2, 0], wallMat);
 
-    // 天花板
+    // 天花板：提亮色调（旧色在新光照下仍偏死黑）
     const ceil = new THREE.Mesh(
       new THREE.PlaneGeometry(W, D),
-      new THREE.MeshStandardMaterial({ color: '#26344b', roughness: 0.95 })
+      new THREE.MeshStandardMaterial({ color: '#46587a', roughness: 0.92 })
     );
     ceil.rotation.x = Math.PI / 2;
     ceil.position.y = H;
@@ -409,10 +580,10 @@ export class Game {
     pipe2.scale.setScalar(0.7);
     this.scene.add(pipe2);
 
-    // 观察窗（北墙发光窗）
+    // 观察窗（北墙）：程序化窗外远景（§57）
     const win = new THREE.Mesh(
       new THREE.PlaneGeometry(6, 1.6),
-      new THREE.MeshBasicMaterial({ color: '#8fd3ff' })
+      new THREE.MeshBasicMaterial({ map: windowView() })
     );
     win.position.set(cx, 2.6, ROOM.minZ + 0.23);
     this.scene.add(win);
@@ -1044,6 +1215,10 @@ export class Game {
       mat.emissive.set(on ? '#12b886' : '#20304a');
       mat.emissiveIntensity = on ? 1.4 : 0.6;
       this.coreGroup.ring.material.emissive.set(on ? '#38d9a9' : '#ff922b');
+      if (this.coreLight) {
+        this.coreLight.intensity = on ? 16 : 4;
+        this.coreLight.color.set(on ? '#38d9a9' : '#ff922b');
+      }
     }
     if (this.exitSign) {
       this.exitSign.material.color.set(puzzle.exitOpen ? '#51cf66' : '#ff6b6b');
@@ -1290,6 +1465,9 @@ export class Game {
       r.group.rotation.y = r.yaw;
       r.body.position.set(r.pos.x, r.pos.y + 0.42, r.pos.z);
       r.body.aabbNeedsUpdate = true;
+      // 行走摆动：趋近目标的差距近似瞬时速度
+      const sp = r.targetPos ? r.pos.distanceTo(r.targetPos) * 10 : 0;
+      animateAvatar(r.group, sp, nowMs / 1000);
     }
 
     // 鸡的自主跑动（由模拟者执行，撞到谁全靠物理）
